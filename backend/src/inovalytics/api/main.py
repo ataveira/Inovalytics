@@ -222,4 +222,7 @@ def create_app(
 
 def app_factory() -> FastAPI:
     """Entrypoint para `uvicorn --factory inovalytics.api.main:app_factory`."""
+    # O uvicorn só configura os próprios loggers; sem isto o log INFO do startup se perderia.
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
     return create_app()
