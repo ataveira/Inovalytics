@@ -331,6 +331,7 @@ def test_no_new_dependencies(repo_root: Path) -> None:
         "uvicorn>=0.30",
         "asyncpg>=0.30",
         "boto3>=1.35",
+        "python-multipart>=0.0.9",  # F1-05c (ADR-007); Pillow continua fora
     ]
     assert len(data["project"]["optional-dependencies"]["dev"]) == 7
 

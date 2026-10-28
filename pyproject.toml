@@ -12,6 +12,7 @@ dependencies = [
     "uvicorn>=0.30",
     "asyncpg>=0.30",
     "boto3>=1.35",
+    "python-multipart>=0.0.9",
 ]
 # A licença do projeto é uma decisão pendente (ver docs/spec.md); não declarar aqui.
 
