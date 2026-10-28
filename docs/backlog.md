@@ -13,7 +13,7 @@ Revisado contra `docs/spec.md` em 28/10/2026. A partir desta revisão, as fases 
 **Fatos informados pelo humano (28/10/2026)**
 - Os modelos de analítico do iNVR são ONNX treinados no Google Colab. O framework de treino, os pesos iniciais e o dataset usados nesses notebooks ainda não estão comprovados; a origem e a licença dependem dos notebooks e dos registros do Colab (ver F1-02 e F5-12 a F5-14). Isso não permite concluir se os modelos são ou não derivados da Ultralytics.
 
-**Próxima tarefa executável: F0-06.**
+**Próxima tarefa executável: F1-05 (F0-06 aguarda o PR #8 e as pendências H1–H6; F1-01 e F1-02 também estão livres).**
 
 ## Fase 0: Fundação técnica (pré-requisito da Fase 1 do plano)
 - [x] F0-01 Estrutura do repositório (backend/, frontend/, docs/, docker/), `pyproject.toml`, ruff, mypy, pytest
@@ -228,7 +228,7 @@ Auditoria de licenças, modelo base, importadores e validação de datasets.
   - **Provenance dos modelos atuais do iNVR:** levantar os notebooks do Google Colab usados no treino de cada ONNX em produção (EPI, fogo, pessoas) e registrar em `docs/licencas.md`, por modelo: framework e versão de treino, pesos iniciais (origem, licença, SHA-256), dataset (origem, licença), data do treino e hash do ONNX; sem esse registro o modelo fica com parecer PENDENTE e não pode ser migrado.
 - [ ] F1-03 Seleção do modelo base permissivo e da política de pesos iniciais [bloqueada: decisão D2]
   - **Dependências:** F1-02. **Tamanho:** S. **Aceite:** ADR com o modelo base escolhido, licença dos pesos, e a política (do zero ou ajuste a partir de pesos permissivos) conforme a decisão D2 registrada pelo humano; sem ela a tarefa não inicia.
-- [~] F1-04 Modelo de dados e migrações: projeto, dataset, imagem, anotação, classe
+- [x] F1-04 Modelo de dados e migrações: projeto, dataset, imagem, anotação, classe
   - **Dependências:** F0-02, F0-04 (concluídas). Não depende de F0-06 nem do PR #8. **Tamanho:** M. Dividida em três subtarefas de até ~1 dia, na ordem a, b, c, cada uma com `make check` verde ao final: **F1-04a** esquema SQL e testes estáticos; **F1-04b** executor de migrações e CLI; **F1-04c** repositório asyncpg.
   - **Objetivo:** criar o esquema relacional base (projeto, dataset, classe, imagem, anotação de caixa delimitadora), com integridade garantida pelo banco, migrações versionadas e idempotentes, e uma camada de acesso asyncpg sem ORM. Sem endpoints REST (F4), sem upload (F1-05), sem importadores (F1-06 a F1-08), sem usuários/autenticação (F4-01), sem versionamento de dataset (F3).
   - **Decisões de projeto (a registrar como ADR-006, status "proposta"):**
