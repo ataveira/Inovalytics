@@ -59,4 +59,12 @@
   confirmadas contra o GitHub, por falta de rede no ambiente; conferir na primeira execução.
   O teste estático aceita as duas formas.
 - Consequência: `test_no_ultralytics` passa a varrer também `.github/`.
-
+- Concorrência: `cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}`. Execuções em `main` não
+  são canceladas (o smoke de `main` conta para a regra das 3 execuções verdes); nas demais refs, a
+  execução antiga é cancelada.
+- Aceito: push e PR da mesma branch disparam execuções duplicadas (grupos de concorrência distintos,
+  pois `github.ref` difere). Custo tolerado pela simplicidade.
+- Aceito, a revisar depois: o filtro do smoke não inclui `pyproject.toml` nem
+  `backend/tests/test_compose_smoke.py`; mudanças só neles não disparam o smoke em PR.
+- Node 22 no workflow não foi confirmado contra o GitHub (sem rede no ambiente), assim como as
+  versões major das actions; conferir na primeira execução.

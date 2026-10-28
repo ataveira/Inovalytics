@@ -115,7 +115,8 @@ def test_timeouts_and_concurrency(wf: dict[Any, Any]) -> None:
         t = jobs[name]["timeout-minutes"]
         assert isinstance(t, int) and not isinstance(t, bool)
         assert 0 < t <= limit
-    assert wf["concurrency"]["cancel-in-progress"] is True
+    # Nao cancelar o smoke em main: so cancela fora dela (expressao exata, sem `false` literal).
+    assert wf["concurrency"]["cancel-in-progress"] == "${{ github.ref != 'refs/heads/main' }}"
     assert jobs["gate"]["runs-on"] == "ubuntu-24.04"
     assert jobs["compose-smoke"]["runs-on"] == "ubuntu-24.04"
 
@@ -146,7 +147,8 @@ def test_no_secrets_in_workflow(raw: str) -> None:
     assert "secrets." not in raw
     assert not SECRET_RE.search(raw)
     assert not PRIVATE_KEY_RE.search(raw)
-    assert not re.search(r"(curl|wget)[^\n|]*\|\s*(sudo\s+)?(ba|z)?sh", raw)
+    joined = raw.replace("\\\n", " ")  # junta continuacoes de linha com barra invertida
+    assert not re.search(r"(curl|wget)[^\n|]*\|\s*(sudo(\s+-\S+)*\s+)?(ba|z)?sh", joined)
     assert "pull_request_target" not in raw
 
 
