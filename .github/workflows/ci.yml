@@ -72,7 +72,7 @@ jobs:
             run=true
           elif [ "$EVENT_NAME" = "pull_request" ]; then
             if git diff --name-only "$BASE_SHA" "$HEAD_SHA" \
-              | grep -E '^(docker-compose\.yml|docker/|\.env\.example$|backend/src/)' > /dev/null; then
+              | grep -E '^(docker-compose\.yml|docker/|\.env\.example$|backend/src/|pyproject\.toml$|backend/tests/test_compose_smoke\.py$)' > /dev/null; then
               run=true
             fi
           fi
@@ -94,14 +94,31 @@ jobs:
         env:
           PYTEST_ADDOPTS: --junitxml=smoke.xml
         run: make compose-smoke
+      - name: Publicar JUnit do smoke
+        if: always() && steps.filter.outputs.run == 'true'
+        uses: actions/upload-artifact@v5
+        with:
+          name: smoke-junit
+          path: smoke.xml
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Diagnóstico do smoke (só em falha)
         if: failure() && steps.filter.outputs.run == 'true'
         run: |
           python - <<'PY'
+          import os
           import xml.etree.ElementTree as ET
-          for case in ET.parse("smoke.xml").iter("testcase"):
-              for f in list(case.iter("failure")) + list(case.iter("error")):
-                  text = (f.get("message") or "") + "\n" + (f.text or "")
-                  lines = [x for x in text.splitlines() if x.strip()][-25:]
-                  print("::error::" + case.get("name", "?") + " | " + " ⏎ ".join(lines)[:3500].replace("%", "%25"))
+          if not os.path.exists("smoke.xml"):
+              print("::warning::smoke.xml ausente (o smoke falhou antes do pytest ou o pytest não iniciou)")
+          else:
+              try:
+                  root = ET.parse("smoke.xml").getroot()
+              except ET.ParseError as exc:
+                  print("::warning::smoke.xml ilegível (XML truncado): " + str(exc))
+              else:
+                  for case in root.iter("testcase"):
+                      for f in list(case.iter("failure")) + list(case.iter("error")):
+                          text = (f.get("message") or "") + "\n" + (f.text or "")
+                          lines = [x for x in text.splitlines() if x.strip()][-25:]
+                          print("::error::" + case.get("name", "?") + " | " + " ⏎ ".join(lines)[:3500].replace("%", "%25"))
           PY

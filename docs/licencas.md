@@ -83,3 +83,4 @@ confirmadas em 2026-10-28: o CI executou com elas e passou; ver ADR-003.
 | actions/checkout | v5 | MIT | https://github.com/actions/checkout |
 | actions/setup-python | v6 | MIT | https://github.com/actions/setup-python |
 | actions/setup-node | v6 | MIT | https://github.com/actions/setup-node |
+| actions/upload-artifact | v5 | MIT | https://github.com/actions/upload-artifact |
