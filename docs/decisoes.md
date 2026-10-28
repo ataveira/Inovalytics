@@ -92,12 +92,32 @@
   execução antiga é cancelada.
 - Aceito: push e PR da mesma branch disparam execuções duplicadas (grupos de concorrência distintos,
   pois `github.ref` difere). Custo tolerado pela simplicidade.
-- Aceito, a revisar depois: o filtro do smoke não inclui `pyproject.toml` nem
-  `backend/tests/test_compose_smoke.py`; mudanças só neles não disparam o smoke em PR.
+- Resolvido na F0-06: o filtro do smoke inclui também `pyproject.toml` e
+  `backend/tests/test_compose_smoke.py`.
 - Confirmado em 2026-10-28 no GitHub: Node 22 e as versões major das actions funcionam; o job `gate`
   passou em Python 3.11 e 3.12 (cerca de 40 s cada) e o `compose-smoke` manual passou (cerca de 2 min,
   incluindo o pull das imagens). Ainda falta ele ficar verde em 3 execuções seguidas para virar check
   obrigatório, e o erro de lint proposital (critério 17) não foi exercitado.
+
+### Endurecimento (F0-06)
+
+Pinagem: major
+- Decisão D-CI1 (humano): manter actions por versão major (`checkout@v5`, `setup-python@v6`,
+  `setup-node@v6`, `upload-artifact@v5`). `test_pinning_policy_matches_adr` exige que o workflow siga a
+  linha "Pinagem:" acima; trocar para SHA exige mudar essa linha, os `uses:` e `licencas.md`.
+- `actions/upload-artifact` (MIT, oficial) publica `smoke.xml` como `smoke-junit` (retenção 7 dias,
+  `if: always()` filtrado pelo smoke, `if-no-files-found: ignore`). Sem permissão extra.
+- Diagnóstico robusto: tolera `smoke.xml` ausente ou truncado (`ParseError`), só roda em falha e sem
+  segredos. Timeouts: `gate` 15 min e `compose-smoke` 25 min (teto testado).
+- Pendências do humano (não implementadas; registrar evidência aqui):
+  - H1. PR descartável com erro de lint: `gate` vermelho em 3.11 e 3.12 (link: pendente).
+  - H2. Smoke: execuções verdes consecutivas: 0/3 contadas (1 manual verde); depois, decidir se vira
+    check obrigatório.
+  - H3. Proteção de `main`: exigir `gate (python 3.11)` e `gate (python 3.12)`, PR obrigatório.
+  - H4. Settings > Actions: permissões somente leitura, só actions do GitHub, aprovação para forks,
+    retenção de artefatos/logs.
+  - H5. Confirmar na execução real o upload de `smoke-junit` e que `upload-artifact@v5` resolve.
+  - H6. Opcional: Dependabot para `github-actions` (necessário se um dia migrar para SHA).
 
 ## ADR-004: Verificação automática de licenças (F0-04)
 
