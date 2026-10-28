@@ -339,3 +339,60 @@ def test_makefile_has_migrate_target(repo_root: Path) -> None:
     text = (repo_root / "Makefile").read_text(encoding="utf-8")
     assert "migrate:" in text
     assert "inovalytics.db.migrate up" in text
+
+
+# revisão F1-04b: SQLSTATE, unlock que falha, down órfão
+class _SqlStateError(Exception):
+    sqlstate = "23503"
+
+
+def test_failure_message_has_sqlstate_but_not_exception_text() -> None:
+    class Conn(FakeConn):
+        async def execute(self, query: str, *args: Any) -> None:
+            if query == "UP_A;":
+                raise _SqlStateError(f"segredo {SENT_PW} INSERT INTO t")
+            await super().execute(query, *args)
+
+    with pytest.raises(MigrationError) as ei:
+        _run(migrate.up(Conn(), [_mig(1, "a", "UP_A;")]))
+    text = str(ei.value)
+    assert "SQLSTATE 23503" in text and "_SqlStateError" in text
+    assert SENT_PW not in text and "INSERT" not in text
+
+
+def test_unlock_failure_does_not_mask_original_error() -> None:
+    class Conn(FakeConn):
+        async def execute(self, query: str, *args: Any) -> None:
+            if query == migrate.UNLOCK_SQL:
+                raise RuntimeError("unlock falhou")
+            await super().execute(query, *args)
+
+    with pytest.raises(MigrationError, match=r"0001_a"):
+        _run(migrate.up(Conn(fail_on="UP_A;"), [_mig(1, "a", "UP_A;")]))
+    assert _run(migrate.up(Conn(), [])) == []  # sem erro original, unlock falho é engolido
+
+
+def test_discover_orphan_down_file_is_runtime_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Entry:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def read_bytes(self) -> bytes:
+            return b"SELECT 1;"
+
+    class Root:
+        def __truediv__(self, _: str) -> "Root":
+            return self
+
+        def iterdir(self) -> list[Entry]:
+            return [Entry("0001_a.up.sql"), Entry("0001_a.down.sql"), Entry("0002_b.down.sql")]
+
+    monkeypatch.setattr(migrate.resources, "files", lambda _: Root())
+    with pytest.raises(MigrationError, match=r"órfão 0002_b"):
+        discover()
+
+
+def test_dsn_quotes_host_and_database() -> None:
+    cfg = PostgresSettings(host="h/o@st", user="u", password="p", database="d/b?x=1")
+    dsn = cfg.dsn
+    assert "h%2Fo%40st" in dsn and dsn.endswith("/d%2Fb%3Fx%3D1")

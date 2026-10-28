@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import hashlib
 import os
 import re
@@ -76,11 +77,18 @@ def _label(version: int, name: str) -> str:
     return f"{version:04d}_{name}"
 
 
+def _cause(exc: BaseException) -> str:
+    """Tipo da exceção e SQLSTATE (se houver); nunca o texto, que pode ter SQL ou dados."""
+    sqlstate = getattr(exc, "sqlstate", None)
+    suffix = f", SQLSTATE {sqlstate}" if isinstance(sqlstate, str) and sqlstate else ""
+    return f"{type(exc).__name__}{suffix}"
+
+
 def discover() -> list[Migration]:
     """Lê as migrações do pacote, em ordem numérica, com o SHA-256 de cada `up`."""
     root = resources.files("inovalytics.db") / "migrations"
     ups: dict[int, tuple[str, bytes]] = {}
-    downs: dict[int, str] = {}
+    downs: dict[int, tuple[str, str]] = {}
     for entry in root.iterdir():
         m = _FILE_RE.match(entry.name)
         if not m:
@@ -90,13 +98,17 @@ def discover() -> list[Migration]:
         if kind == "up":
             ups[version] = (name, data)
         else:
-            downs[version] = data.decode("utf-8")
+            downs[version] = (name, data.decode("utf-8"))
+    for version in sorted(downs):
+        if version not in ups:
+            raise MigrationError(f"arquivo down órfão {_label(version, downs[version][0])}")
     result: list[Migration] = []
     for version in sorted(ups):
         name, data = ups[version]
         if version not in downs:
             raise MigrationError(f"migração {_label(version, name)} sem arquivo down")
-        result.append(Migration(version, name, data.decode("utf-8"), downs[version], _sha256(data)))
+        up_sql, down_sql = data.decode("utf-8"), downs[version][1]
+        result.append(Migration(version, name, up_sql, down_sql, _sha256(data)))
     return result
 
 
@@ -146,7 +158,9 @@ async def _locked(
         await conn.execute(CREATE_TABLE_SQL)
         return await action()
     finally:
-        await conn.execute(UNLOCK_SQL, ADVISORY_LOCK_KEY)
+        # Não mascara o erro original; encerrar a sessão libera o advisory lock.
+        with contextlib.suppress(Exception):
+            await conn.execute(UNLOCK_SQL, ADVISORY_LOCK_KEY)
 
 
 async def up(conn: Connection, available: Sequence[Migration] | None = None) -> list[Migration]:
@@ -163,7 +177,7 @@ async def up(conn: Connection, available: Sequence[Migration] | None = None) -> 
                     await conn.execute(INSERT_SQL, m.version, m.name, m.checksum)
             except Exception as exc:
                 raise MigrationError(
-                    f"falha ao aplicar {_label(m.version, m.name)} ({type(exc).__name__})"
+                    f"falha ao aplicar {_label(m.version, m.name)} ({_cause(exc)})"
                 ) from None
             done.append(m)
         return done
@@ -196,7 +210,7 @@ async def down(
                     await conn.execute(DELETE_SQL, m.version)
             except Exception as exc:
                 raise MigrationError(
-                    f"falha ao reverter {_label(m.version, m.name)} ({type(exc).__name__})"
+                    f"falha ao reverter {_label(m.version, m.name)} ({_cause(exc)})"
                 ) from None
             reverted.append(m)
         return reverted

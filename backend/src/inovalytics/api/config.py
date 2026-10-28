@@ -42,7 +42,9 @@ class PostgresSettings:
         """DSN completo. Contém a senha: nunca logar nem imprimir."""
         user = quote(self.user, safe="")
         password = quote(self.password, safe="")
-        return f"postgresql://{user}:{password}@{self.host}:{self.port}/{self.database}"
+        host = quote(self.host, safe="")
+        database = quote(self.database, safe="")
+        return f"postgresql://{user}:{password}@{host}:{self.port}/{database}"
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> PostgresSettings:
