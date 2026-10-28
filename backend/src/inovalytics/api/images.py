@@ -38,6 +38,12 @@ _ID_RE = re.compile(r"^[1-9][0-9]{0,18}$")
 _MAX_BIGINT = 2**63 - 1
 _CONTENT_TYPES = {"jpg": "image/jpeg", "png": "image/png"}
 _DB_ERRORS = (asyncpg.PostgresError, asyncpg.InterfaceError, OSError, TimeoutError)
+MAX_FORM_FIELDS = 8  # só `split` é esperado; o resto é lixo
+DB_ACQUIRE_TIMEOUT = 10.0  # s: espera por conexão do pool (cobre criar o pool + fila)
+
+
+class DbBusyError(Exception):
+    """Sem conexão do pool dentro de `DB_ACQUIRE_TIMEOUT`."""
 
 
 class DbUnavailableError(Exception):
@@ -300,7 +306,7 @@ def register_upload(
         if ds is None:
             return error_response(422, "Identificador de dataset inválido.", "dataset_id_invalido")
         try:
-            form = await request.form()
+            form = await request.form(max_files=limits.max_files + 1, max_fields=MAX_FORM_FIELDS)
         except HTTPException:
             return error_response(422, "Corpo multipart inválido.", "multipart_invalido")
         try:
@@ -330,22 +336,39 @@ def register_upload(
         try:
             async with AsyncExitStack() as stack:
                 try:
-                    conn = await stack.enter_async_context(provider.acquire())
+                    async with asyncio.timeout(DB_ACQUIRE_TIMEOUT) as deadline:
+                        conn = await stack.enter_async_context(provider.acquire())
                 except Exception as exc:
+                    if deadline.expired():  # nosso prazo, não um TimeoutError do driver
+                        log.error("timeout ao obter conexão do banco")
+                        raise DbBusyError from None
                     log.error("banco indisponível: %s", type(exc).__name__)
                     raise DbUnavailableError from None
                 results = await upload_images(
                     ConnImageRepository(conn), store, ds, items, limits, split=split
                 )
+        except DbBusyError:
+            return error_response(
+                503, "Banco de dados ocupado; tente novamente.", "banco_timeout_conexao"
+            )
         except DbUnavailableError:
             return _db_down()
         except repo.NotFoundError:
             return error_response(404, "Dataset não encontrado.", "dataset_nao_encontrado")
         except UploadError as exc:
             return error_response(exc.status, exc.message, exc.code, exc.file_index)
+        except asyncpg.IntegrityConstraintViolationError as exc:
+            # Violação de restrição não é indisponibilidade: só o tipo vai ao log (sem mensagem).
+            log.error("violação de integridade no upload: %s", type(exc).__name__)
+            return error_response(
+                409, "Conflito ao registrar a imagem no banco.", "conflito_integridade"
+            )
         except _DB_ERRORS as exc:
             log.error("erro de banco no upload: %s", type(exc).__name__)
             return _db_down()
+        except Exception as exc:
+            log.error("erro inesperado no upload: %s", type(exc).__name__)
+            return error_response(500, "Erro interno no servidor.", "erro_interno")
         status = 201 if any(r.created for r in results) else 200
         return JSONResponse(
             status_code=status,

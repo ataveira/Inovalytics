@@ -562,3 +562,53 @@ def test_routes_are_only_health_and_upload() -> None:
     paths = {getattr(r, "path", "") for r in create_app(Settings(postgres_password="x")).routes}
     assert "/datasets/{dataset_id}/images" in paths
     assert {"/health", "/health/ready"} <= paths
+
+
+# --- recomendações do revisor (F1-05) ---------------------------------------------------------
+
+
+def test_acquire_timeout_is_503_with_clear_code(env: Env, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(images, "DB_ACQUIRE_TIMEOUT", 0.05)
+
+    @asynccontextmanager
+    async def slow() -> Any:
+        await asyncio.sleep(5)
+        yield "conn"
+
+    env.provider.acquire = slow  # type: ignore[method-assign]
+    r = post(env.client(), [("a.png", png(), "image/png")])
+    assert r.status_code == 503 and r.json()["code"] == "banco_timeout_conexao"
+    assert env.store.puts == 0
+
+
+def test_integrity_violation_is_409_without_leak(env: Env) -> None:
+    async def boom(*a: Any, **k: Any) -> Any:
+        raise asyncpg.exceptions.CheckViolationError("postgresql://u:PGPASS-xyz@h/db")
+
+    env.repo.insert_image = boom  # type: ignore[method-assign]
+    r = post(env.client(), [("a.png", png(), "image/png")])
+    assert r.status_code == 409 and r.json()["code"] == "conflito_integridade"
+    assert set(r.json()) == {"detail", "code", "file_index"}
+    assert not env.store.objects
+    _no_leak(r.text)
+
+
+def test_unexpected_error_is_json_500(env: Env) -> None:
+    env.repo.fail_insert = True
+    r = post(env.client(), [("a.png", png(), "image/png")])
+    assert r.status_code == 500 and r.json()["code"] == "erro_interno"
+    assert set(r.json()) == {"detail", "code", "file_index"}
+    _no_leak(r.text)
+
+
+def test_too_many_files_is_422_from_service_not_parser(env: Env) -> None:
+    env.settings = Settings(**{**env.settings.__dict__, "upload_max_files": 2})
+    files = [(f"{i}.png", png(i), "image/png") for i in range(3)]
+    r = post(env.client(), files)
+    assert r.status_code == 422 and env.store.puts == 0
+
+
+def test_too_many_form_fields_is_422(env: Env) -> None:
+    extra = {f"f{i}": "x" for i in range(20)}
+    r = post(env.client(), [("a.png", png(), "image/png")], **extra)
+    assert r.status_code == 422 and env.store.puts == 0
