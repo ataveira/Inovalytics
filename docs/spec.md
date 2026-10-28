@@ -27,7 +27,7 @@ Regras do projeto:
 - Não usar "YOLO" nem a marca Ultralytics no nome de produto ou modelos.
 - Auditoria de licença de cada dependência e de cada peso pré-treinado antes de entrar no repositório.
 
-Candidatos permissivos, a confirmar na auditoria: YOLOX (já usado no iNVR), RT-DETR ou RF-DETR, SAM (Apache 2.0), ByteTrack (MIT) e ONNX Runtime. Esta seção não é parecer jurídico; vale validar com advogado antes do lançamento.
+Candidatos permissivos, a confirmar na auditoria: YOLOX (já usado no iNVR), RT-DETR ou RF-DETR, SAM (Apache 2.0 declarada; código e pesos a confirmar), ByteTrack (MIT) e ONNX Runtime. Esta seção não é parecer jurídico; vale validar com advogado antes do lançamento.
 
 ## Arquitetura
 
@@ -94,17 +94,22 @@ Já entregue (repositório `ataveira/Inovalytics`, branch `main`):
 
 ### Alinhamento entre o plano e o backlog
 
-O `docs/backlog.md` usa fases técnicas próprias (F0 a F4). A correspondência com as fases deste plano é:
+O `docs/backlog.md` (revisado em 28/10/2026) usa a mesma numeração deste plano: as fases F1 a F6 do backlog
+correspondem às Fases 1 a 6 acima. A Fase 0 é o pré-requisito técnico (repositório, Compose, CI, verificação de
+licenças) e não consta do plano original.
 
 | Backlog | Plano |
 | --- | --- |
-| F0: infraestrutura técnica (repositório, Compose, CI, licenças) | Pré-requisito da Fase 1 (Fundação) |
-| F1: dados e anotação | Fase 1 (importadores, validação) e Fase 3 (anotação) |
-| F2: treino | Fase 2 (treino e exportação) |
-| F3: exportação e deploy | Fases 2 e 5 (exportação, servidor de inferência, integração NVR) |
-| F4: produto | Fases 4 e 6 (plataforma local e lançamento) |
+| F0: infraestrutura técnica (repositório, Compose, CI, verificação de licenças) | Pré-requisito da Fase 1 |
+| F1 | Fase 1: Fundação (auditoria de licenças, modelo base, importadores, validação de datasets) |
+| F2 | Fase 2: Treino e exportação |
+| F3 | Fase 3: Anotação |
+| F4 | Fase 4: Plataforma local |
+| F5 | Fase 5: Soluções de vídeo |
+| F6 | Fase 6: Lançamento |
 
-O backlog ainda não cobre todos os itens do plano (por exemplo: auditoria de licenças dos pesos pré-treinados, benchmark contra o iNVR, zonas, contagem, mapa de calor, alertas e webhooks, migração dos analíticos de EPI, fogo e busca de pessoas). Revisar o backlog contra esta especificação é a próxima tarefa de planejamento.
+As tarefas que dependem das decisões pendentes (D1 a D5, abaixo) estão marcadas como bloqueadas no backlog e não
+assumem resposta.
 
 ### Observação sobre os módulos
 
