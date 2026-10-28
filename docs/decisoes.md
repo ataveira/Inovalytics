@@ -161,3 +161,41 @@
 - Consequência: `packaging` passa a ser importado (extra `dev`, registrado em `docs/licencas.md`);
   PyYAML e `packaging` são importados só dentro dos coletores.
 
+
+## ADR-006: Modelo de dados e migrações (F1-04)
+
+- Status: proposta (aguarda o humano nas pendências H1 a H7; os padrões abaixo foram assumidos
+  para destravar a implementação e podem ser trocados).
+- Decisão: esquema relacional `project`, `dataset`, `label_class`, `image`, `annotation` (caixa
+  normalizada centro/largura/altura) em `backend/src/inovalytics/db/migrations/0001_initial.*.sql`;
+  migrações em SQL puro executadas por executor próprio sobre asyncpg
+  (`python -m inovalytics.db.migrate {up,down,status}`, `make migrate`). Sem ORM e sem dependência nova.
+- Executor: tabela `schema_migrations(version, name, checksum_sha256, applied_at)` criada pelo
+  executor; cada migração roda em transação junto com o seu registro; `pg_advisory_lock` com chave
+  constante (`ADVISORY_LOCK_KEY`, ASCII "INOVMIGR") serializa execuções concorrentes; checksum
+  SHA-256 do `up` barra edição de migração aplicada (migrações mescladas são imutáveis; mudanças
+  entram em `0002_*`). Mensagens de erro nunca trazem DSN, senha nem texto de SQL.
+- Execução: comando separado, nunca no startup da API (ADR-005: a API não depende do Postgres para
+  subir). `api/main.py` não importa `inovalytics.db` (teste AST). Serviço `migrate` no Compose fica
+  fora do escopo.
+- Integridade no banco: FKs compostas `(id, project_id)` impedem anotação com classe de outro
+  projeto, sem trigger. CASCADE de projeto/dataset/imagem para descendentes; `annotation -> label_class`
+  é `NO ACTION` **e `DEFERRABLE INITIALLY DEFERRED`**. Achado em Postgres real: com `NO ACTION`
+  imediato a exclusão em cascata de um projeto falha, porque a verificação da classe roda antes de a
+  cascata dataset -> image -> annotation terminar. Adiada, a verificação ocorre ao fim do
+  comando; excluir classe em uso continua falhando com violação de chave estrangeira (em transação
+  explícita, o erro aparece no COMMIT).
+- Caixa: CHECKs `0 <= x,y <= 1`, `0 < w,h <= 1` (rejeitam NaN e Infinity). Sem CHECK de contenção
+  na imagem: caixa fora da imagem é relatório de qualidade da F1-10.
+- Objetos órfãos: a exclusão em cascata remove só linhas; objetos no S3 ficam no bucket (limpeza
+  posterior, F1-05/F4).
+- Pendências do humano (padrão adotado entre parênteses):
+  - H1. Ferramenta de migração (executor próprio; alternativa: Alembic + SQLAlchemy, MIT).
+  - H2. Onde migrar (comando separado; alternativa: serviço `migrate` one-shot no Compose).
+  - H3. `down` (só desenvolvimento e teste; em produção pode apagar dados).
+  - H4. Caixa fora da imagem (aceita no banco, reportada na F1-10).
+  - H5. Cascata sem apagar o S3 (aceita; limpeza assíncrona depois).
+  - H6. Identificadores (`bigint` sequencial; alternativa: UUID quando houver autenticação, F4-01).
+  - H7. Nomes de projeto e de classe (sensíveis a maiúsculas e minúsculas; alternativa: `lower(name)`).
+- Testes: estáticos (regex) em `make check`; semântica em Postgres real em
+  `backend/tests/test_db_postgres_docker.py` (marcador `docker`, `make compose-smoke`).

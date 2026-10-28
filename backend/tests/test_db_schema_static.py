@@ -91,6 +91,10 @@ def test_4_on_delete_map(up: str) -> None:
         ("annotation", "image"): "CASCADE",
         ("annotation", "label_class"): "NO ACTION",
     }
+    # NO ACTION adiado: o imediato quebra a cascata de exclusão de projeto (visto em Postgres real).
+    flat = re.sub(r"\s+", " ", up)
+    assert "ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED" in flat
+    assert flat.count("DEFERRABLE") == 1
     for bad in ("RESTRICT", "SET NULL", "SET DEFAULT"):
         assert bad not in up
 

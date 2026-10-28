@@ -1,4 +1,7 @@
 -- 0001: esquema base (projeto, dataset, classe, imagem, anotação de caixa delimitadora).
+-- annotation_class_fk é DEFERRABLE INITIALLY DEFERRED de propósito: com NO ACTION imediato, a
+-- exclusão em cascata de um projeto falha, pois a verificação da classe roda antes da cascata
+-- dataset -> image -> annotation terminar. Adiada, confere ao fim do comando/transação.
 -- Migração imutável depois de mesclada (o checksum falha); mudanças entram em 0002_*.
 
 CREATE TABLE project (
@@ -69,7 +72,8 @@ CREATE TABLE annotation (
     CONSTRAINT annotation_image_fk FOREIGN KEY (image_id, project_id)
         REFERENCES image (id, project_id) ON DELETE CASCADE,
     CONSTRAINT annotation_class_fk FOREIGN KEY (class_id, project_id)
-        REFERENCES label_class (id, project_id) ON DELETE NO ACTION,
+        REFERENCES label_class (id, project_id) ON DELETE NO ACTION
+        DEFERRABLE INITIALLY DEFERRED,
     CONSTRAINT annotation_x_center_range CHECK (x_center >= 0 AND x_center <= 1),
     CONSTRAINT annotation_y_center_range CHECK (y_center >= 0 AND y_center <= 1),
     CONSTRAINT annotation_width_range CHECK (width > 0 AND width <= 1),
