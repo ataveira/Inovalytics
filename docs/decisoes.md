@@ -34,8 +34,29 @@
   Postgres e storage seguem sem porta publicada.
 - Configuração: as settings ficaram em `inovalytics/api/config.py` (e não em `inovalytics/config.py`
   como no backlog). `POSTGRES_PASSWORD`, `S3_ACCESS_KEY` e `S3_SECRET_KEY` são obrigatórias.
-- Dívida: a criação do bucket dentro de `/health/ready` é efeito colateral num endpoint de leitura;
-  mover para o startup da API ou para a F1-02.
+- Dívida: a criação do bucket dentro de `/health/ready` era efeito colateral num endpoint de leitura.
+  RESOLVIDA na F0-05 (ver ADR-005); `/health/ready` é somente leitura.
+
+## ADR-005: Criação do bucket S3 no startup da API (F0-05)
+
+- Status: proposta (aguarda revisão).
+- Decisão: `ensure_bucket` roda no lifespan do FastAPI; `check_s3` do `/health/ready` só faz
+  `head_bucket`. O contrato HTTP de `/health` e `/health/ready` não mudou.
+- Política: storage é obrigatório no startup; Postgres não. Se o bucket não puder ser
+  verificado/criado após o retry, o startup falha (processo sai com código != 0). Motivos: o compose
+  já tem `depends_on: storage: service_healthy` e `restart: unless-stopped` (falha rápida + reinício
+  é a recuperação natural); evita estado meio-configurado em que uploads (F1-05) falham sem causa
+  clara. O Postgres fica de fora porque a API deve continuar viva devolvendo 503 quando o `db` para
+  (critério 13 da F0-02).
+- Retry: `S3_STARTUP_TIMEOUT` (prazo total, padrão 30 s) e `S3_STARTUP_RETRIES` (tentativas,
+  padrão 5), ambos positivos. Backoff 0,5 s dobrando até 5 s, limitado pelo prazo restante. Só erros
+  transitórios (conexão, timeout, HTTP 5xx) repetem; credenciais ou permissão erradas falham na 1ª
+  tentativa. `BucketAlreadyOwnedByYou`/`BucketAlreadyExists` contam como sucesso (corrida entre
+  réplicas). O boto3 segue com `max_attempts=1`; o retry é laço próprio, sem biblioteca nova.
+- Segredos: log e exceção citam só bucket, tipo da exceção e nº da tentativa.
+- Testes: `create_app(..., bucket_initializer=...)`; com `checks` injetados e sem initializer o
+  startup é no-op. Não há variável de produção para pular o startup. Os testes usam a fixture
+  `no_external_network` (a `no_network` bloqueia `socket.socket` e quebra o event loop do asyncio).
 
 ## ADR-003: CI no GitHub Actions (F0-03)
 
