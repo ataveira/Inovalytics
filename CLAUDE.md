@@ -12,7 +12,8 @@ Plataforma gratuita e on-premise de visão computacional (anotação, treino, ex
 Detalhes em `docs/spec.md`. Módulos: dados/anotação, treino, exportação, inferência/integração NVR, interface web.
 
 ## Stack padrão
-- Python 3.11+, FastAPI, PostgreSQL, MinIO, Docker Compose, React no front.
+- Python 3.11+, FastAPI, PostgreSQL (driver asyncpg), armazenamento S3-compatível permissivo (SeaweedFS por padrão, via boto3 e variáveis S3_*), Docker Compose, React no front.
+- MinIO e psycopg (AGPL/LGPL) não entram no padrão (ver ADR-002).
 - Testes: pytest. Lint: ruff. Tipos: mypy. Front: vitest + eslint.
 
 ## Comandos

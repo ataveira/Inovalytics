@@ -14,5 +14,35 @@ A automação da verificação fica para a F0-04. Nenhuma dependência da Ultral
 | @eslint/js | 9.39.5 | MIT | https://github.com/eslint/eslint |
 | typescript | 5.9.3 | Apache-2.0 | https://github.com/microsoft/TypeScript |
 | typescript-eslint | 8.72.1 | MIT | https://github.com/typescript-eslint/typescript-eslint |
+| fastapi | 0.162.0 | MIT | https://github.com/fastapi/fastapi |
+| uvicorn | 0.54.0 | BSD-3-Clause | https://github.com/Kludex/uvicorn |
+| asyncpg | 0.32.0 | Apache-2.0 | https://github.com/MagicStack/asyncpg |
+| boto3 | 1.43.120 | Apache-2.0 | https://github.com/boto/boto3 |
+| httpx | 0.28.1 | BSD-3-Clause | https://github.com/encode/httpx |
+| pyyaml | 6.0.3 | MIT | https://github.com/yaml/pyyaml |
+| types-PyYAML | 6.0.12.20260906 | Apache-2.0 | https://github.com/python/typeshed |
+
+## Imagens de contêiner
+
+| Nome | Versão | Licença (SPDX) | URL |
+|------|--------|----------------|-----|
+| postgres (imagem oficial) | 17.6 | PostgreSQL | https://github.com/docker-library/postgres |
+| chrislusf/seaweedfs | 3.97 | Apache-2.0 | https://github.com/seaweedfs/seaweedfs |
+| python (imagem base, slim-bookworm) | 3.12.11 | PSF-2.0 | https://github.com/docker-library/python |
+
+As imagens `postgres` e `python` incluem pacotes Debian com licenças diversas (inclusive GPL),
+usados sem modificação como distribuição oficial. SeaweedFS roda sem modificações como
+serviço separado, acessado só pela rede (API S3). Tags a confirmar com `docker pull` na primeira
+execução do `make compose-smoke` (não verificadas no ambiente de implementação, sem acesso ao registro).
+
+## Dependências transitivas relevantes (verificadas via metadados do pacote instalado)
+
+starlette 1.10.0 (BSD-3-Clause), pydantic 2.14.1 (MIT), pydantic-core 2.50.1 (MIT),
+anyio 4.15.1 (MIT), click 8.5.0 (BSD-3-Clause), h11 0.16.0 (MIT), httpcore 1.0.9 (BSD-3-Clause),
+botocore 1.43.120 (Apache-2.0), s3transfer 0.19.3 (Apache-2.0), jmespath 1.1.0 (MIT),
+urllib3 2.8.0 (MIT), python-dateutil 2.9.0 (BSD-3-Clause ou Apache-2.0), six 1.17.0 (MIT),
+idna 3.20 (BSD-3-Clause), typing-extensions 4.16.0 (PSF-2.0), annotated-types (MIT),
+opentelemetry-api 1.45.1 (Apache-2.0). Exceção de copyleft fraco: certifi 2026.10.23 (MPL-2.0,
+nível de arquivo, sem modificação; vem via httpx/botocore). Nenhuma GPL/AGPL/SSPL.
 
 Observação: a licença do próprio Inovalytics é uma decisão pendente (ver `docs/spec.md`).
