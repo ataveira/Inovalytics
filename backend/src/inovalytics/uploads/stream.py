@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 from dataclasses import dataclass
@@ -19,7 +20,7 @@ class ReadResult:
 
 
 async def read_limited(stream: Any, max_bytes: int, chunk: int = READ_CHUNK) -> ReadResult:
-    """Lê `stream.read(n)` (síncrono ou assíncrono) até o fim, sem passar de `max_bytes`.
+    """Lê `stream.read(n)` (síncrono em thread, ou assíncrono) até o fim, sem passar de `max_bytes`.
 
     Pede no máximo `chunk` bytes por vez e nunca mais que `max_bytes + 1` no total: ao chegar no
     byte `max_bytes + 1` levanta `TooLargeError` sem consumir o restante.
@@ -29,9 +30,13 @@ async def read_limited(stream: Any, max_bytes: int, chunk: int = READ_CHUNK) -> 
     total = 0
     while True:
         want = min(chunk, max_bytes + 1 - total)
-        data = stream.read(want)
-        if inspect.isawaitable(data):
-            data = await data
+        if inspect.iscoroutinefunction(stream.read):
+            data = await stream.read(want)
+        else:
+            # Arquivo síncrono (spool do multipart, possivelmente em disco): fora do event loop.
+            data = await asyncio.to_thread(stream.read, want)
+            if inspect.isawaitable(data):
+                data = await data
         if not data:
             break
         total += len(data)

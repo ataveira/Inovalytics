@@ -49,3 +49,21 @@ def test_limit_plus_one_raises_without_consuming_rest() -> None:
 def test_exact_boundary_byte() -> None:
     with pytest.raises(TooLargeError):
         asyncio.run(read_limited(io.BytesIO(b"x" * 11), 10))
+
+
+def test_sync_read_runs_off_the_event_loop() -> None:
+    import threading
+
+    seen: list[int] = []
+
+    class Src:
+        def __init__(self) -> None:
+            self.buf = io.BytesIO(b"x" * 100)
+
+        def read(self, n: int) -> bytes:
+            seen.append(threading.get_ident())
+            return self.buf.read(n)
+
+    main_thread = threading.get_ident()
+    r = asyncio.run(read_limited(Src(), 100, chunk=30))
+    assert r.size == 100 and seen and all(t != main_thread for t in seen)
