@@ -9,7 +9,7 @@ Plataforma gratuita e on-premise de visão computacional (anotação, treino, ex
 - O revisor deve bloquear qualquer mudança que viole esta regra.
 
 ## Arquitetura (5 módulos Docker)
-Detalhes em `docs/spec.md`. Módulos: dados/anotação, treino, exportação, inferência/integração NVR, interface web.
+Detalhes em `docs/spec.md`. Módulos: núcleo de treino, exportação, anotação, plataforma local e soluções de vídeo (inferência RTSP/NVR).
 
 ## Stack padrão
 - Python 3.11+, FastAPI, PostgreSQL (driver asyncpg), armazenamento S3-compatível permissivo (SeaweedFS por padrão, via boto3 e variáveis S3_*), Docker Compose, React no front.
