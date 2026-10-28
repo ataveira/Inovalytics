@@ -32,8 +32,8 @@ A automação da verificação fica para a F0-04. Nenhuma dependência da Ultral
 
 As imagens `postgres` e `python` incluem pacotes Debian com licenças diversas (inclusive GPL),
 usados sem modificação como distribuição oficial. SeaweedFS roda sem modificações como
-serviço separado, acessado só pela rede (API S3). Tags a confirmar com `docker pull` na primeira
-execução do `make compose-smoke` (não verificadas no ambiente de implementação, sem acesso ao registro).
+serviço separado, acessado só pela rede (API S3). Tags confirmadas em 2026-10-28: o `compose-smoke` manual (workflow_dispatch, run 40735240168) fez o
+pull e subiu a stack com sucesso no GitHub Actions.
 
 ## Dependências transitivas relevantes (verificadas via metadados do pacote instalado)
 
@@ -52,8 +52,8 @@ Observação: a licença do próprio Inovalytics é uma decisão pendente (ver `
 
 ## GitHub Actions
 
-Somente actions oficiais (organização `actions`), fixadas por versão major. As versões não foram
-confirmadas contra o GitHub no ambiente de implementação (sem rede); ver ADR-003.
+Somente actions oficiais (organização `actions`), fixadas por versão major. As versões foram
+confirmadas em 2026-10-28: o CI executou com elas e passou; ver ADR-003.
 
 | Nome | Versão | Licença (SPDX) | URL |
 |------|--------|----------------|-----|

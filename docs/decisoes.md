@@ -55,8 +55,8 @@
 - O smoke só vira check obrigatório na proteção de branch após 3 execuções verdes seguidas.
 - Actions: apenas oficiais (`actions/checkout@v5`, `actions/setup-python@v6`, `actions/setup-node@v6`),
   fixadas por versão MAJOR e não por SHA. A escolha entre major e SHA de 40 hex é decisão do humano
-  (SHA é mais seguro contra mudança de tag; major dá menos manutenção). As versões major não foram
-  confirmadas contra o GitHub, por falta de rede no ambiente; conferir na primeira execução.
+  (SHA é mais seguro contra mudança de tag; major dá menos manutenção). As versões major foram
+  confirmadas em 2026-10-28: as execuções do CI resolveram e passaram.
   O teste estático aceita as duas formas.
 - Consequência: `test_no_ultralytics` passa a varrer também `.github/`.
 - Concorrência: `cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}`. Execuções em `main` não
@@ -66,5 +66,7 @@
   pois `github.ref` difere). Custo tolerado pela simplicidade.
 - Aceito, a revisar depois: o filtro do smoke não inclui `pyproject.toml` nem
   `backend/tests/test_compose_smoke.py`; mudanças só neles não disparam o smoke em PR.
-- Node 22 no workflow não foi confirmado contra o GitHub (sem rede no ambiente), assim como as
-  versões major das actions; conferir na primeira execução.
+- Confirmado em 2026-10-28 no GitHub: Node 22 e as versões major das actions funcionam; o job `gate`
+  passou em Python 3.11 e 3.12 (cerca de 40 s cada) e o `compose-smoke` manual passou (cerca de 2 min,
+  incluindo o pull das imagens). Ainda falta ele ficar verde em 3 execuções seguidas para virar check
+  obrigatório, e o erro de lint proposital (critério 17) não foi exercitado.
