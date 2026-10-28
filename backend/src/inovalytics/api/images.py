@@ -259,7 +259,7 @@ class RequestBodyLimitMiddleware:
 
 
 def _parse_dataset_id(raw: str) -> int | None:
-    if not _ID_RE.match(raw):
+    if not _ID_RE.fullmatch(raw):
         return None
     value = int(raw)
     return value if value <= _MAX_BIGINT else None

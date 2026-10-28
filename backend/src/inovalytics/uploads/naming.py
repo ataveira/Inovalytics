@@ -9,6 +9,8 @@ _SHA_RE = re.compile(r"[0-9a-f]{64}", re.ASCII)
 _EXTS = frozenset({"jpg", "png"})
 _FALLBACK = "imagem"
 MAX_NAME = 255
+# controle, formatação invisível (bidi, ZWSP, BOM) e separadores de linha/parágrafo
+_DROPPED = frozenset({"Cc", "Cf", "Zl", "Zp"})
 
 
 def build_object_key(dataset_id: int, sha256: str, ext: str) -> str:
@@ -25,7 +27,7 @@ def build_object_key(dataset_id: int, sha256: str, ext: str) -> str:
 def _once(name: str) -> str:
     s = unicodedata.normalize("NFC", name)
     s = re.split(r"[/\\]", s)[-1]
-    s = "".join(c for c in s if unicodedata.category(c) != "Cc").strip()
+    s = "".join(c for c in s if unicodedata.category(c) not in _DROPPED).strip()
     if s in ("", ".", ".."):
         return _FALLBACK
     if len(s) > MAX_NAME:
