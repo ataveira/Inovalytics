@@ -253,6 +253,23 @@ Pinagem: major
   primeiro uso sob `asyncio.Lock`, falha não memorizada (vira 503), fechado no shutdown só se criado.
   `api/main.py` não importa `inovalytics.db`; só `api/images.py` importa (guardas da F1-04 relaxadas
   de forma mínima). O cliente S3 também é criado no primeiro uso.
+- Recursos e concorrência: o parser multipart grava o corpo em arquivo temporário (spool) e a
+  rota limita `max_files + 1` arquivos e 8 campos; o spool pode ocupar em disco até o limite total
+  (`UPLOAD_MAX_FILES * UPLOAD_MAX_BYTES + 64 KiB`) antes de o 413 por arquivo sair. Não há limite
+  de requisições simultâneas; aceito porque a API publica em `127.0.0.1` por padrão (`API_BIND`).
+  A leitura do spool roda em thread (`asyncio.to_thread`), sem bloquear o event loop.
+- Timeouts: o cliente S3 do upload usa connect 3 s e read `S3_UPLOAD_READ_TIMEOUT` (padrão 60 s);
+  o de health segue com `HEALTH_CHECK_TIMEOUT`. Esperar conexão do pool além de 10 s dá 503
+  `banco_timeout_conexao`. Checksums do boto3 ficam em `when_required` (compatibilidade com
+  SeaweedFS), quando o botocore instalado aceita a opção.
+- Erros de banco: violação de restrição (`IntegrityConstraintViolationError`) vira 409
+  `conflito_integridade`; indisponibilidade/conexão vira 503 `banco_indisponivel`; qualquer outra
+  falha vira 500 `erro_interno`, todas no formato `{detail, code, file_index}` e com log só do tipo.
+- Janela de compensação: se duas requisições enviam os mesmos bytes ao mesmo tempo, a compensação
+  (apagar o objeto após falha no insert) só apaga se não houver linha para o `sha256`; uma
+  requisição que insere logo depois da checagem de outra pode deixar a linha apontando para um
+  objeto já apagado (chave determinística por conteúdo). A janela é estreita e aceita até a
+  rotina de limpeza/reconciliação (H-F1-05-7).
 - Sem autenticação até a F4-01: não abrir `API_BIND` para a rede com este endpoint antes disso.
 - Pendências do humano (padrão adotado entre parênteses):
   - H-F1-05-1. Limites padrão (20 MiB por arquivo, 20 arquivos, 16384 px por lado, 100 MP).
