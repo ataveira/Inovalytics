@@ -28,7 +28,11 @@ class DuplicateError(RepositoryError):
     """Violação de unicidade ou de integridade referencial por uso (ex.: nome repetido)."""
 
 
-class InvalidAnnotationError(RepositoryError):
+class InvalidValueError(RepositoryError):
+    """Valor rejeitado por uma regra (CHECK) do banco."""
+
+
+class InvalidAnnotationError(InvalidValueError):
     """Anotação rejeitada pelo banco (caixa fora dos limites ou classe de outro projeto)."""
 
 
@@ -139,7 +143,11 @@ LIST_ANNOTATIONS_SQL = (
 )
 
 
-def _failure(exc: BaseException, fk_error: type[RepositoryError]) -> BaseException:
+def _failure(
+    exc: BaseException,
+    fk_error: type[RepositoryError],
+    check_error: type[RepositoryError] = InvalidValueError,
+) -> BaseException:
     """Erro de domínio equivalente ao do asyncpg (sem a mensagem original) ou o próprio `exc`.
 
     O chamador faz `raise` fora do bloco `except`, para que o erro original (que pode trazer
@@ -150,7 +158,7 @@ def _failure(exc: BaseException, fk_error: type[RepositoryError]) -> BaseExcepti
     if isinstance(exc, asyncpg.exceptions.ForeignKeyViolationError):
         return fk_error("referência inválida")
     if isinstance(exc, asyncpg.exceptions.CheckViolationError):
-        return InvalidAnnotationError("valor rejeitado pelas regras do banco")
+        return check_error("valor rejeitado pelas regras do banco")
     return exc
 
 
@@ -286,7 +294,7 @@ async def insert_annotations(
                 ],
             )
     except asyncpg.exceptions.PostgresError as exc:
-        failure = _failure(exc, InvalidAnnotationError)
+        failure = _failure(exc, InvalidAnnotationError, InvalidAnnotationError)
     if failure is not None:
         raise failure
     return len(boxes)

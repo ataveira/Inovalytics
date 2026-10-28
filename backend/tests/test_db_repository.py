@@ -16,6 +16,7 @@ from inovalytics.db import repository as repo
 from inovalytics.db.repository import (
     DuplicateError,
     InvalidAnnotationError,
+    InvalidValueError,
     NewAnnotation,
     NotFoundError,
 )
@@ -178,7 +179,7 @@ def test_batch_unknown_image() -> None:
     [
         (asyncpg.exceptions.UniqueViolationError, DuplicateError, "create_project"),
         (asyncpg.exceptions.ForeignKeyViolationError, NotFoundError, "create_dataset"),
-        (asyncpg.exceptions.CheckViolationError, InvalidAnnotationError, "create_class"),
+        (asyncpg.exceptions.CheckViolationError, InvalidValueError, "create_class"),
         (asyncpg.exceptions.ForeignKeyViolationError, DuplicateError, "delete_project"),
     ],
 )
@@ -199,6 +200,8 @@ def test_asyncpg_errors_become_domain_errors_without_leaks(
     text = repr(ei.value) + str(ei.value) + repr(ei.value.__cause__) + repr(ei.value.__context__)
     assert SENTINEL not in text and "SELECT" not in text and "INSERT" not in text
     assert ei.value.__context__ is None
+    if expected is InvalidValueError:  # CHECK fora de anotações não vira erro de anotação
+        assert not isinstance(ei.value, InvalidAnnotationError)
 
 
 def test_unmapped_errors_propagate() -> None:
