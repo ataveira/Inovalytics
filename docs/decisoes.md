@@ -36,3 +36,27 @@
   como no backlog). `POSTGRES_PASSWORD`, `S3_ACCESS_KEY` e `S3_SECRET_KEY` são obrigatórias.
 - Dívida: a criação do bucket dentro de `/health/ready` é efeito colateral num endpoint de leitura;
   mover para o startup da API ou para a F1-02.
+
+## ADR-003: CI no GitHub Actions (F0-03)
+
+- Status: proposta, para revisão.
+- Makefile como fonte da verdade: o CI só instala dependências e chama `make check` (gate) e
+  `make compose-smoke` (smoke). Nenhuma lógica de qualidade fica duplicada no YAML. Isso mantém
+  portabilidade: trocar de provedor de CI (GitLab, Gitea, Jenkins) exige reescrever só a instalação.
+- Workflow `.github/workflows/ci.yml`: gatilhos `push` (`main`, `feat/**`), `pull_request` e
+  `workflow_dispatch`; `permissions: contents: read`; concorrência com `cancel-in-progress`; runner
+  `ubuntu-24.04`; `persist-credentials: false`; sem segredos e sem `pull_request_target`.
+- Job `gate`: matriz Python 3.11 e 3.12, Node 22, `pip install -e ".[dev]"`, `npm ci`, `make check`.
+  `engines.node >= 20` declarado em `frontend/package.json`.
+- Job `compose-smoke`: independente do gate. Roda em push para `main`, `workflow_dispatch` e em PR
+  apenas se mudar `docker-compose.yml`, `docker/**`, `.env.example` ou `backend/src/**` (filtro por
+  `git diff` em passo de shell, sem actions de terceiros). A primeira execução também confirma as tags
+  de imagem registradas em `docs/licencas.md`.
+- O smoke só vira check obrigatório na proteção de branch após 3 execuções verdes seguidas.
+- Actions: apenas oficiais (`actions/checkout@v5`, `actions/setup-python@v6`, `actions/setup-node@v6`),
+  fixadas por versão MAJOR e não por SHA. A escolha entre major e SHA de 40 hex é decisão do humano
+  (SHA é mais seguro contra mudança de tag; major dá menos manutenção). As versões major não foram
+  confirmadas contra o GitHub, por falta de rede no ambiente; conferir na primeira execução.
+  O teste estático aceita as duas formas.
+- Consequência: `test_no_ultralytics` passa a varrer também `.github/`.
+

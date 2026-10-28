@@ -49,3 +49,14 @@ no runtime/imagem da API, apenas no ambiente de desenvolvimento e testes. Exceç
 humano em 2026-10-28 (ver ADR-002). Nenhuma GPL/AGPL/SSPL.
 
 Observação: a licença do próprio Inovalytics é uma decisão pendente (ver `docs/spec.md`).
+
+## GitHub Actions
+
+Somente actions oficiais (organização `actions`), fixadas por versão major. As versões não foram
+confirmadas contra o GitHub no ambiente de implementação (sem rede); ver ADR-003.
+
+| Nome | Versão | Licença (SPDX) | URL |
+|------|--------|----------------|-----|
+| actions/checkout | v5 | MIT | https://github.com/actions/checkout |
+| actions/setup-python | v6 | MIT | https://github.com/actions/setup-python |
+| actions/setup-node | v6 | MIT | https://github.com/actions/setup-node |
