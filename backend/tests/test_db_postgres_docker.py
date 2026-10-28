@@ -1,4 +1,6 @@
-"""F1-04 critérios 18 a 22: migrações e integridade em Postgres real (make compose-smoke).
+"""F1-04 critérios 18 a 22 (migrações, integridade) e 25 a 27 (repositório) em Postgres real.
+
+Rodam com `make compose-smoke`.
 
 Sobe só o serviço `db` do Compose, em projeto isolado e com credenciais aleatórias.
 """
@@ -19,6 +21,7 @@ import pytest
 
 from inovalytics.api.config import PostgresSettings
 from inovalytics.db import migrate
+from inovalytics.db import repository as repo
 
 pytestmark = pytest.mark.docker
 
@@ -338,3 +341,118 @@ async def test_delete_image_removes_annotations_and_class_rules(db: Any) -> None
     await db.execute("DELETE FROM image WHERE id = $1", img)
     assert await db.fetchval("SELECT count(*) FROM annotation") == 0
     await db.execute("DELETE FROM label_class WHERE id = $1", used)  # sem uso agora
+
+
+# ---- F1-04c: repositório em Postgres real (critérios 25 a 27)
+def _img_kw(key: str = "k/1") -> dict[str, Any]:
+    return {"object_key": key, "file_name": "f.jpg", "sha256": SHA_A, "size_bytes": 10,
+            "width_px": 100, "height_px": 80}  # fmt: skip
+
+
+async def _repo_world(c: Any) -> tuple[repo.Project, repo.Dataset, repo.LabelClass, repo.Image]:
+    p = await repo.create_project(c, "p")
+    d = await repo.create_dataset(c, p.id, "d")
+    k = await repo.create_class(c, p.id, "car", 0)
+    img, created = await repo.insert_image(c, d.id, **_img_kw())
+    assert created
+    return p, d, k, img
+
+
+@_with_db()
+async def test_repo_roundtrip_and_delete_cascade(c: Any) -> None:
+    p, _, k, img = await _repo_world(c)
+    assert await repo.get_project(c, p.id) == p
+    assert [x.id for x in await repo.list_projects(c)] == [p.id]
+    n = await repo.insert_annotations(c, img.id, [repo.NewAnnotation(k.id, 0.5, 0.5, 1.0, 0.2)])
+    assert n == 1
+    got = await repo.list_annotations(c, img.id)
+    assert [(a.class_id, a.project_id, a.width) for a in got] == [(k.id, p.id, 1.0)]
+    await repo.delete_project(c, p.id)
+    for t in TABLES:
+        assert await c.fetchval(f"SELECT count(*) FROM {t}") == 0  # noqa: S608
+    with pytest.raises(repo.NotFoundError):
+        await repo.delete_project(c, p.id)
+    with pytest.raises(repo.NotFoundError):
+        await repo.get_project(c, p.id)
+
+
+@_with_db()
+async def test_repo_insert_image_idempotent(c: Any) -> None:
+    _, d, _, img = await _repo_world(c)
+    again, created = await repo.insert_image(c, d.id, **_img_kw("k/outro"))
+    assert created is False and again == img
+    assert await c.fetchval("SELECT count(*) FROM image") == 1
+    with pytest.raises(repo.NotFoundError):
+        await repo.insert_image(c, d.id + 999, **_img_kw("k/x"))
+    other = {**_img_kw("k/1"), "sha256": SHA_B}  # object_key repetida com sha diferente
+    with pytest.raises(repo.DuplicateError):
+        await repo.insert_image(c, d.id, **other)
+
+
+def test_repo_insert_image_concurrent_same_sha(pg: PostgresSettings) -> None:
+    async def body() -> None:
+        c0 = await asyncpg.connect(dsn=pg.dsn)
+        await c0.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public")
+        await migrate.up(c0)
+        _, d, _, _ = await _repo_world(c0)
+        await c0.execute("DELETE FROM image")
+        conns = [await asyncpg.connect(dsn=pg.dsn) for _ in range(4)]
+        try:
+            res = await asyncio.gather(
+                *(repo.insert_image(c, d.id, **_img_kw(f"k/{i}")) for i, c in enumerate(conns))
+            )
+        finally:
+            for c in conns:
+                await c.close()
+        assert sorted(r[1] for r in res) == [False, False, False, True]
+        assert len({r[0].id for r in res}) == 1
+        assert await c0.fetchval("SELECT count(*) FROM image") == 1
+        await c0.close()
+
+    asyncio.run(body())
+
+
+@_with_db()
+async def test_repo_batch_all_or_nothing(c: Any) -> None:
+    _, _, k, img = await _repo_world(c)
+    good = repo.NewAnnotation(k.id, 0.5, 0.5, 0.2, 0.2)
+    for bad in (
+        repo.NewAnnotation(k.id, 1.01, 0.5, 0.2, 0.2),
+        repo.NewAnnotation(k.id, 0.5, 0.5, float("nan"), 0.2),
+        repo.NewAnnotation(k.id, 0.5, 0.5, float("inf"), 0.2),
+    ):
+        with pytest.raises(repo.InvalidAnnotationError):
+            await repo.insert_annotations(c, img.id, [good, bad])
+        assert await c.fetchval("SELECT count(*) FROM annotation") == 0
+    with pytest.raises(repo.NotFoundError):
+        await repo.insert_annotations(c, img.id + 999, [good])
+    assert await repo.insert_annotations(c, img.id, [good, good]) == 2
+
+
+@_with_db()
+async def test_repo_annotation_with_foreign_class_is_rejected(c: Any) -> None:
+    _, _, _, img = await _repo_world(c)
+    p2 = await repo.create_project(c, "p2")
+    k2 = await repo.create_class(c, p2.id, "car", 0)
+    with pytest.raises(repo.InvalidAnnotationError):
+        await repo.insert_annotations(c, img.id, [repo.NewAnnotation(k2.id, 0.5, 0.5, 0.2, 0.2)])
+    assert await c.fetchval("SELECT count(*) FROM annotation") == 0
+
+
+SENTINEL_NAME = "segredo-sentinela-77aa"
+
+
+@_with_db()
+async def test_repo_domain_errors_do_not_leak(c: Any) -> None:
+    p, _, _, _ = await _repo_world(c)
+    with pytest.raises(repo.DuplicateError) as ei:
+        await repo.create_project(c, "p")
+    with pytest.raises(repo.DuplicateError):
+        await repo.create_class(c, p.id, "car", 5)
+    with pytest.raises(repo.DuplicateError):
+        await repo.create_class(c, p.id, SENTINEL_NAME, 0)
+    with pytest.raises(repo.NotFoundError) as ei2:
+        await repo.create_dataset(c, p.id + 999, SENTINEL_NAME)
+    for e in (ei.value, ei2.value):
+        text = str(e) + repr(e) + repr(e.__context__) + repr(e.__cause__)
+        assert SENTINEL_NAME not in text and "INSERT" not in text and "DETAIL" not in text
