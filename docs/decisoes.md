@@ -192,7 +192,7 @@
 - Pendências do humano (padrão adotado entre parênteses):
   - H1. Ferramenta de migração (executor próprio; alternativa: Alembic + SQLAlchemy, MIT).
   - H2. Onde migrar (comando separado; alternativa: serviço `migrate` one-shot no Compose).
-  - H3. `down` (só desenvolvimento e teste; em produção pode apagar dados).
+  - H3. `down` (só desenvolvimento e teste; em produção pode apagar dados). Recomendação futura: o executor não trava `down` em produção hoje; exigir flag explícita (ex.: `--i-know-this-drops-data`) antes de liberar o uso fora de desenvolvimento e teste.
   - H4. Caixa fora da imagem (aceita no banco, reportada na F1-10).
   - H5. Cascata sem apagar o S3 (aceita; limpeza assíncrona depois).
   - H6. Identificadores (`bigint` sequencial; alternativa: UUID quando houver autenticação, F4-01).
