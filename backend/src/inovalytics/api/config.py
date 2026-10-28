@@ -79,6 +79,10 @@ class Settings:
     check_timeout: float = 3.0
     s3_startup_timeout: float = 30.0
     s3_startup_retries: int = 5
+    upload_max_bytes: int = 20 * 1024 * 1024
+    upload_max_files: int = 20
+    upload_max_dimension: int = 16384
+    upload_max_pixels: int = 100_000_000
 
     @property
     def postgres_dsn(self) -> str:
@@ -114,5 +118,17 @@ class Settings:
             ),
             s3_startup_retries=int(
                 _positive(e, "S3_STARTUP_RETRIES", d.s3_startup_retries, integer=True)
+            ),
+            upload_max_bytes=int(
+                _positive(e, "UPLOAD_MAX_BYTES", d.upload_max_bytes, integer=True)
+            ),
+            upload_max_files=int(
+                _positive(e, "UPLOAD_MAX_FILES", d.upload_max_files, integer=True)
+            ),
+            upload_max_dimension=int(
+                _positive(e, "UPLOAD_MAX_DIMENSION", d.upload_max_dimension, integer=True)
+            ),
+            upload_max_pixels=int(
+                _positive(e, "UPLOAD_MAX_PIXELS", d.upload_max_pixels, integer=True)
             ),
         )
