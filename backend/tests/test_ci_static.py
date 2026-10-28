@@ -1,5 +1,7 @@
 import json
 import re
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -9,7 +11,12 @@ import yaml
 
 from test_no_secrets import PRIVATE_KEY_RE, SECRET_RE
 
-ALLOWED_ACTIONS = {"actions/checkout", "actions/setup-python", "actions/setup-node"}
+ALLOWED_ACTIONS = {
+    "actions/checkout",
+    "actions/setup-python",
+    "actions/setup-node",
+    "actions/upload-artifact",
+}
 USES_RE = re.compile(r"^(?P<name>[\w.-]+/[\w./-]+)@(?P<ref>.+)$")
 MAJOR_RE = re.compile(r"^v\d+$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -104,18 +111,18 @@ def test_python_matrix(wf: dict[Any, Any], repo_root: Path) -> None:
 def test_permissions(wf: dict[Any, Any]) -> None:
     assert wf["permissions"] == {"contents": "read"}
     for job in _jobs(wf).values():
-        perms = job.get("permissions", {})
-        assert "write" not in str(perms)
-        assert "id-token" not in str(perms)
+        assert "permissions" not in job
 
 
 def test_timeouts_and_concurrency(wf: dict[Any, Any]) -> None:
     jobs = _jobs(wf)
-    for name, limit in (("gate", 30), ("compose-smoke", 45)):
+    for name, limit in (("gate", 15), ("compose-smoke", 25)):
         t = jobs[name]["timeout-minutes"]
         assert isinstance(t, int) and not isinstance(t, bool)
         assert 0 < t <= limit
     # Nao cancelar o smoke em main: so cancela fora dela (expressao exata, sem `false` literal).
+    group = wf["concurrency"]["group"]
+    assert "github.workflow" in group and "github.ref" in group
     assert wf["concurrency"]["cancel-in-progress"] == "${{ github.ref != 'refs/heads/main' }}"
     assert jobs["gate"]["runs-on"] == "ubuntu-24.04"
     assert jobs["compose-smoke"]["runs-on"] == "ubuntu-24.04"
@@ -136,6 +143,9 @@ def test_caches(wf: dict[Any, Any], repo_root: Path) -> None:
     node = [s for n, _, s in uses if n == "actions/setup-node"]
     assert py and node
     assert all(s["with"]["cache"] == "pip" for s in py)
+    for s in py:
+        assert s["with"]["cache-dependency-path"] == "pyproject.toml"
+        assert (repo_root / "pyproject.toml").is_file()
     for s in node:
         assert s["with"]["cache"] == "npm"
         dep = s["with"]["cache-dependency-path"]
@@ -209,3 +219,200 @@ def test_licencas_lists_every_action(wf: dict[Any, Any], repo_root: Path) -> Non
         row = next((ln for ln in section.splitlines() if ln.startswith(f"| {name} ")), None)
         assert row, f"{name} sem linha em docs/licencas.md"
         assert ref in row and "MIT" in row and f"https://github.com/{name}" in row
+
+
+# --- F0-06: endurecimento do CI ---
+
+SMOKE_PATHS = (
+    "docker-compose.yml",
+    "docker/Dockerfile",
+    ".env.example",
+    "backend/src/inovalytics/x.py",
+    "pyproject.toml",
+    "backend/tests/test_compose_smoke.py",
+)
+
+
+def _smoke_steps(wf: dict[Any, Any]) -> list[dict[str, Any]]:
+    return _steps(_jobs(wf)["compose-smoke"])
+
+
+def _step_named(steps: list[dict[str, Any]], prefix: str) -> dict[str, Any]:
+    return next(s for s in steps if str(s.get("name", "")).startswith(prefix))
+
+
+def test_smoke_filter_regex(wf: dict[Any, Any]) -> None:
+    run = _step_named(_smoke_steps(wf), "Decidir")["run"].replace("\\\n", " ")
+    m = re.search(r"grep -E '([^']+)'", run)
+    assert m
+    rx = re.compile(m.group(1))
+    for path in SMOKE_PATHS:
+        assert rx.search(path), path
+    for path in ("README.md", "frontend/src/x.ts"):
+        assert not rx.search(path), path
+    assert "paths-filter" not in run
+
+
+def test_smoke_diff_needs_full_history(wf: dict[Any, Any]) -> None:
+    steps = _smoke_steps(wf)
+    checkout = next(s for s in steps if str(s.get("uses", "")).startswith("actions/checkout"))
+    assert checkout["with"]["fetch-depth"] == 0
+    assert "dorny" not in str(wf)
+
+
+def test_smoke_junit_upload(wf: dict[Any, Any]) -> None:
+    jobs = _jobs(wf)
+    steps = _smoke_steps(wf)
+    idx = next(i for i, s in enumerate(steps) if s.get("run", "").strip() == "make compose-smoke")
+    up = [
+        i
+        for i, s in enumerate(steps)
+        if str(s.get("uses", "")).startswith("actions/upload-artifact@")
+    ]
+    assert len(up) == 1 and up[0] > idx
+    step = steps[up[0]]
+    assert step["if"] == "always() && steps.filter.outputs.run == 'true'"
+    w = step["with"]
+    assert w["name"] == "smoke-junit" and w["path"] == "smoke.xml"
+    assert w["if-no-files-found"] == "ignore"
+    days = w["retention-days"]
+    assert isinstance(days, int) and not isinstance(days, bool) and 1 <= days <= 30
+    assert not any("upload-artifact" in str(s.get("uses", "")) for s in _steps(jobs["gate"]))
+
+
+def _diag(wf: dict[Any, Any]) -> tuple[dict[str, Any], str]:
+    step = _step_named(_smoke_steps(wf), "Diagnóstico")
+    m = re.search(r"<<'PY'\n(.*?)\n\s*PY\s*$", step["run"], re.S)
+    assert m
+    lines = m.group(1).splitlines()
+    indent = min(len(ln) - len(ln.lstrip()) for ln in lines if ln.strip())
+    return step, "\n".join(ln[indent:] for ln in lines)
+
+
+def _run_diag(code: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-I", "-c", code], cwd=cwd, capture_output=True, text=True, check=False
+    )
+
+
+def test_diagnostic_only_on_failure(wf: dict[Any, Any]) -> None:
+    step, _ = _diag(wf)
+    assert step["if"] == "failure() && steps.filter.outputs.run == 'true'"
+    assert "secrets." not in str(step) and "env" not in step
+
+
+def test_diagnostic_without_smoke_xml(wf: dict[Any, Any], tmp_path: Path) -> None:
+    _, code = _diag(wf)
+    r = _run_diag(code, tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert "::warning::" in r.stdout and "::error::" not in r.stdout
+
+
+def test_diagnostic_with_failure_and_truncated_xml(wf: dict[Any, Any], tmp_path: Path) -> None:
+    _, code = _diag(wf)
+    xml = (
+        '<testsuites><testsuite><testcase name="test_boom">'
+        '<failure message="falhou 100%">trace</failure></testcase></testsuite></testsuites>'
+    )
+    (tmp_path / "smoke.xml").write_text(xml, encoding="utf-8")
+    r = _run_diag(code, tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert "::error::test_boom" in r.stdout and "100%25" in r.stdout
+    (tmp_path / "smoke.xml").write_text(xml[:60], encoding="utf-8")
+    r = _run_diag(code, tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert "::warning::" in r.stdout
+
+
+def test_pinning_policy_matches_adr(wf: dict[Any, Any], raw: str, repo_root: Path) -> None:
+    adr = (repo_root / "docs" / "decisoes.md").read_text(encoding="utf-8")
+    section = adr.split("## ADR-003", 1)[1].split("\n## ADR-004", 1)[0]
+    declared = re.findall(r"^Pinagem: (major|SHA)\b", section, re.M)
+    assert len(declared) == 1, declared
+    for name, ref, _ in _uses(wf):
+        assert name in ALLOWED_ACTIONS
+        if declared[0] == "major":
+            assert MAJOR_RE.match(ref), (name, ref)
+        else:
+            assert SHA_RE.match(ref), (name, ref)
+    if declared[0] == "SHA":
+        for line in raw.splitlines():
+            if "uses:" in line:
+                assert re.search(r"#\s*v\d+\.\d+\.\d+", line), line
+
+
+def test_all_uses_are_official(raw: str) -> None:
+    for m in re.finditer(r"^\s*-?\s*uses:\s*(\S+)", raw, re.M):
+        assert m.group(1).startswith("actions/"), m.group(1)
+        assert "docker://" not in m.group(1)
+    assert not re.search(r"@(main|master)\b", raw)
+
+
+def test_gate_cannot_be_bypassed(wf: dict[Any, Any], repo_root: Path) -> None:
+    steps = _steps(_jobs(wf)["gate"])
+    step = next(s for s in steps if s.get("run", "").strip() == "make check")
+    assert not {"if", "continue-on-error"} & step.keys()
+    for s in steps:
+        run = s.get("run", "")
+        assert "|| true" not in run and "set +e" not in run
+        assert "continue-on-error" not in s
+    mk = (repo_root / "Makefile").read_text(encoding="utf-8")
+    deps = _make_check_deps(mk)
+    assert {
+        "lint-backend",
+        "typecheck",
+        "test",
+        "licencas",
+        "lint-frontend",
+        "test-frontend",
+    } <= deps, deps
+
+
+def _make_logical_lines(mk: str) -> list[str]:
+    return mk.replace("\\\n", " ").splitlines()
+
+
+def _make_check_deps(mk: str) -> set[str]:
+    """Dependências do alvo `check`: pré-requisitos na linha do alvo e `$(MAKE) x` na receita."""
+    lines = _make_logical_lines(mk)
+    start = next(
+        (i for i, ln in enumerate(lines) if re.match(r"^check\s*:(?!=)", ln)),
+        None,
+    )
+    assert start is not None, "alvo `check` ausente no Makefile"
+    deps = set(lines[start].split(":", 1)[1].split("#", 1)[0].split())
+    for ln in lines[start + 1 :]:
+        if ln.strip() and not ln.startswith(("\t", " ", "#")):
+            break  # próximo alvo ou atribuição
+        deps.update(re.findall(r"\$\(MAKE\)\s+([\w.-]+)", ln))
+    return deps
+
+
+def test_check_target_runs_every_tool(repo_root: Path) -> None:
+    mk = (repo_root / "Makefile").read_text(encoding="utf-8")
+    lines = _make_logical_lines(mk)
+    deps = _make_check_deps(mk)
+    expected = {
+        "lint-backend": "ruff check",
+        "typecheck": "mypy",
+        "test": "pytest",
+        "licencas": "license_check",
+        "lint-frontend": "run lint",
+        "test-frontend": "run test",
+    }
+    for dep, tool in expected.items():
+        assert dep in deps, dep
+        i = next(i for i, ln in enumerate(lines) if re.match(rf"^{re.escape(dep)}\s*:", ln))
+        recipe = []
+        for ln in lines[i + 1 :]:
+            if ln.strip() and not ln.startswith(("\t", " ", "#")):
+                break
+            recipe.append(ln)
+        assert tool in "\n".join(recipe), (dep, tool)
+
+
+def test_licencas_has_no_extra_action_rows(wf: dict[Any, Any], repo_root: Path) -> None:
+    text = (repo_root / "docs" / "licencas.md").read_text(encoding="utf-8")
+    section = text.split("## GitHub Actions", 1)[1].split("\n## ", 1)[0]
+    rows = {m.group(1) for m in re.finditer(r"^\| (actions/[\w.-]+) ", section, re.M)}
+    assert rows == {n for n, _, _ in _uses(wf)}

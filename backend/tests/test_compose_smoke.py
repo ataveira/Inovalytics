@@ -154,12 +154,15 @@ def test_startup_fails_fast_when_storage_unavailable(
     assert time.time() - start < 30
     assert run.returncode != 0
     out = run.stdout + run.stderr
-    assert "storage indisponível" in out
+    if "storage indisponível" not in out:  # sem assert: não imprimir `out` (pode ter segredos)
+        pytest.fail("mensagem 'storage indisponível' ausente na saída da API (saída omitida)")
     env_text = env_file.read_text(encoding="utf-8")
     for line in env_text.splitlines():
         key, _, value = line.partition("=")
-        if key in ("POSTGRES_PASSWORD", "S3_ACCESS_KEY", "S3_SECRET_KEY"):
-            assert value not in out
+        # Sem `assert`: o pytest reescreve asserts e imprimiria `value` e `out` na falha.
+        is_secret = key in ("POSTGRES_PASSWORD", "S3_ACCESS_KEY", "S3_SECRET_KEY")
+        if is_secret and value and value in out:
+            pytest.fail(f"segredo {key} vazou no log da API (conteúdo omitido)")
     # Alternativa do critério: recria a API com o storage parado; ela não pode ficar saudável.
     recreate = _dc(repo_root, env_file, "up", "-d", "--no-deps", "--force-recreate", "api")
     assert recreate.returncode == 0, recreate.stderr
