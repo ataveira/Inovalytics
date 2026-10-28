@@ -32,6 +32,6 @@ falham o `make check`. O modo de verificação nunca escreve neste arquivo.
 | s3transfer | Apache-2.0 | runtime | boto3 |
 | six | MIT | runtime | python-dateutil |
 | starlette | BSD-3-Clause | runtime | fastapi |
-| typing-extensions | PSF-2.0 | runtime | anyio, fastapi, opentelemetry-api, pydantic, pydantic-core, typing-inspection |
+| typing-extensions | PSF-2.0 | runtime | anyio, fastapi, opentelemetry-api, pydantic, pydantic-core, starlette, typing-inspection |
 | typing-inspection | MIT | runtime | fastapi, pydantic |
 | urllib3 | MIT | runtime | botocore |
