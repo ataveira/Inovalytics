@@ -440,3 +440,33 @@ def test_smoke_file_has_startup_steps(repo_root: Path) -> None:
     text = (repo_root / "backend/tests/test_compose_smoke.py").read_text("utf-8")
     assert "bucket" in text and "verificado" in text
     assert "--force-recreate" in text and "stop" in text and "storage" in text
+
+
+def test_upload_s3_client_has_own_timeouts_and_checksum_when_required(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def fake_client(*a: Any, **kw: Any) -> object:
+        seen.update(kw)
+        return object()
+
+    monkeypatch.setattr(main.boto3, "client", fake_client)
+    cfg = Settings(**{**CFG.__dict__, "check_timeout": 2.0, "upload_read_timeout": 45.0})
+    main.make_upload_s3_client(cfg)
+    conf = seen["config"]
+    assert conf.connect_timeout == 3.0 and conf.read_timeout == 45.0
+    assert conf.retries["max_attempts"] == 1
+    if "request_checksum_calculation" in main.Config.OPTION_DEFAULTS:
+        assert conf.request_checksum_calculation == "when_required"
+        assert conf.response_checksum_validation == "when_required"
+    main.make_s3_client(cfg)  # o cliente de health continua com check_timeout
+    assert seen["config"].connect_timeout == seen["config"].read_timeout == 2.0
+
+
+@pytest.mark.parametrize("bad", ["0", "-1", "abc", "inf"])
+def test_upload_read_timeout_validated(bad: str) -> None:
+    base = {"POSTGRES_PASSWORD": "p", "S3_ACCESS_KEY": "a", "S3_SECRET_KEY": "s"}
+    with pytest.raises(ValueError, match="S3_UPLOAD_READ_TIMEOUT"):
+        Settings.from_env({**base, "S3_UPLOAD_READ_TIMEOUT": bad})
+    assert Settings.from_env({**base, "S3_UPLOAD_READ_TIMEOUT": ""}).upload_read_timeout == 60.0

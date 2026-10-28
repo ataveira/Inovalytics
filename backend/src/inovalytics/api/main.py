@@ -41,6 +41,41 @@ async def check_postgres(settings: Settings) -> None:
         await conn.close()
 
 
+UPLOAD_CONNECT_TIMEOUT = 3.0  # s; o read do upload vem de Settings.upload_read_timeout
+
+
+def _checksum_options() -> dict[str, str]:
+    """Checksums só "when_required" (SeaweedFS e afins não aceitam os CRC padrão do boto3 novo).
+
+    As opções existem a partir do botocore 1.36; em versões anteriores são omitidas.
+    """
+    names = ("request_checksum_calculation", "response_checksum_validation")
+    if all(n in Config.OPTION_DEFAULTS for n in names):
+        return dict.fromkeys(names, "when_required")
+    return {}
+
+
+def make_upload_s3_client(settings: Settings) -> Any:
+    """Cliente do PUT/DELETE de upload: connect 3 s e read configurável.
+
+    O cliente de health (`make_s3_client`) segue com `check_timeout`.
+    """
+    return boto3.client(
+        "s3",
+        endpoint_url=settings.s3_endpoint_url,
+        aws_access_key_id=settings.s3_access_key,
+        aws_secret_access_key=settings.s3_secret_key,
+        region_name="us-east-1",
+        config=Config(
+            connect_timeout=UPLOAD_CONNECT_TIMEOUT,
+            read_timeout=settings.upload_read_timeout,
+            retries={"max_attempts": 1},
+            s3={"addressing_style": "path"},
+            **_checksum_options(),
+        ),
+    )
+
+
 def make_s3_client(settings: Settings) -> Any:
     # O retry é nosso (ensure_bucket): o boto3 não repete (max_attempts=1).
     return boto3.client(
@@ -195,7 +230,7 @@ def create_app(
     store: ObjectStore = (
         object_store
         if object_store is not None
-        else LazyObjectStore(lambda: Boto3ObjectStore(make_s3_client(cfg), cfg.s3_bucket))
+        else LazyObjectStore(lambda: Boto3ObjectStore(make_upload_s3_client(cfg), cfg.s3_bucket))
     )
     init: Callable[[], Awaitable[None]]
     if bucket_initializer is not None:

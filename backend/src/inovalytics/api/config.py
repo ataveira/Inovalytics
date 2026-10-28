@@ -83,6 +83,9 @@ class Settings:
     upload_max_files: int = 20
     upload_max_dimension: int = 16384
     upload_max_pixels: int = 100_000_000
+    upload_read_timeout: float = (
+        60.0  # leitura do S3 no PUT de upload (s); ver S3_UPLOAD_READ_TIMEOUT
+    )
 
     @property
     def postgres_dsn(self) -> str:
@@ -130,5 +133,8 @@ class Settings:
             ),
             upload_max_pixels=int(
                 _positive(e, "UPLOAD_MAX_PIXELS", d.upload_max_pixels, integer=True)
+            ),
+            upload_read_timeout=_positive(
+                e, "S3_UPLOAD_READ_TIMEOUT", d.upload_read_timeout, integer=False
             ),
         )
