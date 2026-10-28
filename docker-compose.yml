@@ -57,7 +57,7 @@ services:
       S3_SECRET_KEY: ${S3_SECRET_KEY:?defina S3_SECRET_KEY no .env}
       S3_BUCKET: ${S3_BUCKET:-inovalytics}
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "${API_BIND:-127.0.0.1}:${API_PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy

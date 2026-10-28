@@ -29,5 +29,5 @@ Copie `.env.example` para `.env` (nunca commitar). Layout e ferramentas: `docs/d
 
 ## Subir com Docker Compose
 
-Ver `docker/README.md`. Atenção: a porta da API é publicada em `0.0.0.0` por padrão; para
-restringir, use bind em `127.0.0.1` no mapeamento de portas e `API_PORT` para trocar a porta.
+Ver `docker/README.md`. Atenção: a porta da API é publicada só em `127.0.0.1` por padrão.
+Para expor à rede, defina `API_BIND=0.0.0.0` no `.env`; `API_PORT` troca a porta.

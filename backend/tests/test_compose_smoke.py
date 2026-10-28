@@ -50,7 +50,7 @@ def _dc(root: Path, env: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 def _status(path: str) -> int:
     try:
-        with urllib.request.urlopen(f"http://localhost:{PORT}{path}", timeout=5) as r:
+        with urllib.request.urlopen(f"http://127.0.0.1:{PORT}{path}", timeout=5) as r:
             return int(r.status)
     except urllib.error.HTTPError as exc:
         return exc.code

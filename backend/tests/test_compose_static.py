@@ -68,6 +68,7 @@ def test_volumes_and_only_api_published(compose: dict[str, Any]) -> None:
         assert "ports" not in services[name], name
     ports = services["api"]["ports"]
     assert len(ports) == 1 and ports[0].endswith(":8000")
+    assert str(ports[0]).startswith("${API_BIND:-127.0.0.1}:"), "bind padrão deve ser 127.0.0.1"
 
 
 def test_storage_healthcheck_covers_master_and_s3_ports(compose: dict[str, Any]) -> None:

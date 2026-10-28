@@ -316,6 +316,7 @@ def test_compose_only_api_publishes_ports(compose: dict[str, Any]) -> None:
     assert owners == ["api"]
     (port,) = compose["services"]["api"]["ports"]
     assert str(port).endswith(":8000")
+    assert str(port).startswith("${API_BIND:-127.0.0.1}:${API_PORT:-8000}:")
 
 
 def test_published_detector_flags_ports_and_host_network() -> None:
