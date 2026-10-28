@@ -357,11 +357,58 @@ def test_gate_cannot_be_bypassed(wf: dict[Any, Any], repo_root: Path) -> None:
         assert "|| true" not in run and "set +e" not in run
         assert "continue-on-error" not in s
     mk = (repo_root / "Makefile").read_text(encoding="utf-8")
-    block = mk.split("\ncheck:", 1)[1]
-    block = block.split("\n\n", 1)[0]
-    for needle in ("lint-backend", "mypy", "pytest", "licencas", "frontend"):
-        assert needle in block or needle in mk, needle
-    assert re.search(r"^check:.*", mk, re.M)
+    deps = _make_check_deps(mk)
+    assert {
+        "lint-backend",
+        "typecheck",
+        "test",
+        "licencas",
+        "lint-frontend",
+        "test-frontend",
+    } <= deps, deps
+
+
+def _make_logical_lines(mk: str) -> list[str]:
+    return mk.replace("\\\n", " ").splitlines()
+
+
+def _make_check_deps(mk: str) -> set[str]:
+    """Dependências do alvo `check`: pré-requisitos na linha do alvo e `$(MAKE) x` na receita."""
+    lines = _make_logical_lines(mk)
+    start = next(
+        (i for i, ln in enumerate(lines) if re.match(r"^check\s*:(?!=)", ln)),
+        None,
+    )
+    assert start is not None, "alvo `check` ausente no Makefile"
+    deps = set(lines[start].split(":", 1)[1].split("#", 1)[0].split())
+    for ln in lines[start + 1 :]:
+        if ln.strip() and not ln.startswith(("\t", " ", "#")):
+            break  # próximo alvo ou atribuição
+        deps.update(re.findall(r"\$\(MAKE\)\s+([\w.-]+)", ln))
+    return deps
+
+
+def test_check_target_runs_every_tool(repo_root: Path) -> None:
+    mk = (repo_root / "Makefile").read_text(encoding="utf-8")
+    lines = _make_logical_lines(mk)
+    deps = _make_check_deps(mk)
+    expected = {
+        "lint-backend": "ruff check",
+        "typecheck": "mypy",
+        "test": "pytest",
+        "licencas": "license_check",
+        "lint-frontend": "run lint",
+        "test-frontend": "run test",
+    }
+    for dep, tool in expected.items():
+        assert dep in deps, dep
+        i = next(i for i, ln in enumerate(lines) if re.match(rf"^{re.escape(dep)}\s*:", ln))
+        recipe = []
+        for ln in lines[i + 1 :]:
+            if ln.strip() and not ln.startswith(("\t", " ", "#")):
+                break
+            recipe.append(ln)
+        assert tool in "\n".join(recipe), (dep, tool)
 
 
 def test_licencas_has_no_extra_action_rows(wf: dict[Any, Any], repo_root: Path) -> None:
