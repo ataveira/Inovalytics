@@ -56,6 +56,14 @@ def _status(path: str) -> int:
         return exc.code
 
 
+def _status_or_down(path: str) -> int:
+    """Como `_status`, mas devolve 0 se a conexão falhar (API fora do ar ou reiniciando)."""
+    try:
+        return _status(path)
+    except OSError:  # inclui URLError, ConnectionResetError e timeout
+        return 0
+
+
 def _wait_status(path: str, expected: int, timeout: float = 60) -> int:
     """Repete a requisição até obter `expected` ou estourar o prazo; devolve o último status."""
     deadline = time.time() + timeout
@@ -156,4 +164,4 @@ def test_startup_fails_fast_when_storage_unavailable(
     recreate = _dc(repo_root, env_file, "up", "-d", "--no-deps", "--force-recreate", "api")
     assert recreate.returncode == 0, recreate.stderr
     time.sleep(5)
-    assert _status("/health") != 200
+    assert _status_or_down("/health") != 200
