@@ -223,3 +223,44 @@ Pinagem: major
   - H7. Nomes de projeto e de classe (sensíveis a maiúsculas e minúsculas; alternativa: `lower(name)`).
 - Testes: estáticos (regex) em `make check`; semântica em Postgres real em
   `backend/tests/test_db_postgres_docker.py` (marcador `docker`, `make compose-smoke`).
+
+## ADR-007: Upload de imagens (F1-05)
+
+- Status: proposta (aguarda o humano nas pendências H-F1-05-1 a H-F1-05-7; os padrões abaixo foram
+  assumidos para destravar a implementação e podem ser trocados).
+- Rota: `POST /datasets/{dataset_id}/images`, multipart, campo `files` (um ou mais) e campo opcional
+  `split` (`train`, `val`, `test`). Resposta `{"images": [...]}` com `id`, `dataset_id`, `sha256`,
+  `size_bytes`, `width_px`, `height_px`, `content_type`, `file_name`, `split`, `created`; 201 se
+  alguma imagem foi criada, 200 se todas já existiam. Erros: `{"detail", "code", "file_index"}`.
+- Multipart com `python-multipart` (Apache-2.0, versão em `docs/licencas.md`; não instalar o pacote
+  homônimo `multipart`). Alternativa descartada: corpo bruto por `PUT` (sem lote, pior para a web).
+- Limites em duas camadas: (1) middleware ASGI só nesta rota recusa com 413 por `Content-Length`
+  acima de `UPLOAD_MAX_FILES * UPLOAD_MAX_BYTES + 64 KiB` e, sem `Content-Length` (chunked), conta os
+  bytes e aborta a leitura; roda antes do parser, que grava o corpo em arquivo temporário;
+  (2) o serviço lê cada arquivo em blocos de 64 KiB e responde 413 acima de `UPLOAD_MAX_BYTES`.
+- Códigos: 404 dataset inexistente (antes de gravar no S3); 413; 415 conteúdo que não é JPEG nem PNG
+  pela assinatura; 422 estrutura inválida, vazio, dimensão, arquivos demais, `split` ou `dataset_id`
+  inválidos, sem arquivos, multipart malformado; 503 Postgres ou S3 indisponível. Nenhum corpo de
+  erro traz DSN, endpoint, segredo ou caminho local.
+- Imagem validada só pelo cabeçalho, com parser próprio em Python puro (sem Pillow): corpo corrompido
+  com cabeçalho válido passa; detecção fica para a F1-10.
+- Chave S3 `datasets/{dataset_id}/{sha256}.{ext}`, determinística por conteúdo; o nome do cliente só
+  vai (sanitizado) para `image.file_name`. Tipo e extensão vêm da detecção, nunca do cliente.
+- Ordem: valida todo o lote -> deduplica por `(dataset_id, sha256)` -> PUT no S3 -> `insert_image`;
+  falha no insert após o PUT apaga o objeto se não houver linha (compensação). Janela residual
+  (processo morto entre PUT e insert) deixa objeto órfão, aceito até a rotina de limpeza.
+- Postgres na requisição sem ser obrigatório no startup (ADR-005): pool asyncpg preguiçoso criado no
+  primeiro uso sob `asyncio.Lock`, falha não memorizada (vira 503), fechado no shutdown só se criado.
+  `api/main.py` não importa `inovalytics.db`; só `api/images.py` importa (guardas da F1-04 relaxadas
+  de forma mínima). O cliente S3 também é criado no primeiro uso.
+- Sem autenticação até a F4-01: não abrir `API_BIND` para a rede com este endpoint antes disso.
+- Pendências do humano (padrão adotado entre parênteses):
+  - H-F1-05-1. Limites padrão (20 MiB por arquivo, 20 arquivos, 16384 px por lado, 100 MP).
+  - H-F1-05-2. Validar só o cabeçalho (alternativa: decodificar com Pillow, HPND, em tarefa à parte).
+  - H-F1-05-3. Formatos aceitos (só JPEG e PNG).
+  - H-F1-05-4. Deduplicação por dataset (alternativa: global no projeto, exige migração 0002).
+  - H-F1-05-5. Endpoint aberto até a F4-01 (alternativa: chave de API provisória em `.env`).
+  - H-F1-05-6. Lote validado como um todo (alternativa: aceitação parcial com relatório, 207).
+  - H-F1-05-7. Limpeza de objetos órfãos (adiada; confirmar se vira tarefa antes da beta).
+- Testes: HTTP com fakes em `backend/tests/test_api_images.py` (`make check`); fluxo real com
+  Postgres e SeaweedFS em `backend/tests/test_upload_docker.py` (marcador `docker`, `make compose-smoke`).
