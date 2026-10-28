@@ -1,7 +1,9 @@
 PYTHON ?= python
 NPM_FRONT = npm --prefix frontend
+# Só para `licencas-sync` (ex.: LICENCAS_ARGS=--prune). O alvo `licencas` não aceita argumentos.
+LICENCAS_ARGS ?=
 
-.PHONY: compose-smoke test lint check lint-backend lint-frontend typecheck test-frontend frontend-deps
+.PHONY: compose-smoke test lint check lint-backend lint-frontend typecheck test-frontend frontend-deps licencas licencas-sync
 
 # Fora do `make check`: exige Docker (pula os testes se ausente).
 compose-smoke:
@@ -28,7 +30,16 @@ test-frontend: frontend-deps
 frontend-deps:
 	@test -d frontend/node_modules || $(NPM_FRONT) install --no-audit --no-fund
 
-# Ordem: ruff, mypy, pytest, depois eslint e vitest do frontend.
+# Verificação de licenças (F0-04): offline, nunca escreve. Falha com código 1 se houver violação.
+licencas:
+	$(PYTHON) -m inovalytics.tools.license_check
+
+# Atualiza docs/licencas-transitivas.md por união (nunca apaga; use --prune à mão). Rode também no
+# Python 3.11 e no 3.12 e faça commit, pois os marcadores de ambiente mudam a árvore.
+licencas-sync:
+	$(PYTHON) -m inovalytics.tools.license_check --write $(LICENCAS_ARGS)
+
+# Ordem: ruff, mypy, pytest, licenças, depois eslint e vitest do frontend.
 check:
 	@# Limitação: este grep é só a primeira barreira (apenas .py, apenas imports no início da linha;
 	@# não vê Dockerfile, .toml, .json, imports dinâmicos). Cobertura completa: backend/tests/test_no_ultralytics.py.
@@ -36,5 +47,6 @@ check:
 	$(MAKE) lint-backend
 	$(MAKE) typecheck
 	$(MAKE) test
+	$(MAKE) licencas
 	$(MAKE) lint-frontend
 	$(MAKE) test-frontend

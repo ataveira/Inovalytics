@@ -1,0 +1,28 @@
+# Exceções à política de licenças (ADR-004). Cada [[excecao]] vale só para o pacote, as versões e
+# o grupo listados. Exceção nunca cobre licença proibida (AGPL/GPL/LGPL/SSPL...) nem a Ultralytics.
+
+[[excecao]]
+ecossistema = "python"
+pacote = "certifi"
+versoes = ">=2026.1"
+grupo = "dev"
+licenca_declarada = "MPL-2.0"
+licenca_verificada = "MPL-2.0"
+evidencia = "https://github.com/certifi/python-certifi/blob/master/LICENSE"
+justificativa = "Copyleft fraco por arquivo, sem modificação; só em dev (via httpx), fora da imagem da API."
+aprovador = "humano"
+data = "2026-10-28"
+adr = "ADR-002"
+
+[[excecao]]
+ecossistema = "python"
+pacote = "pathspec"
+versoes = "==1.1.1"
+grupo = "dev"
+licenca_declarada = "Mozilla Public License 2.0 (MPL 2.0)"
+licenca_verificada = "MPL-2.0"
+evidencia = "https://github.com/cpburnz/python-pathspec/blob/master/LICENSE"
+justificativa = "Copyleft fraco por arquivo, sem modificação; dependência transitiva de dev exigida pelo mypy (pip show: Required-by mypy; classifier de licença MPL-2.0 no METADATA do pacote 1.1.1); só no grupo dev, fora da imagem da API e sem redistribuição."
+aprovador = "humano"
+data = "2026-10-28"
+adr = "ADR-004"
