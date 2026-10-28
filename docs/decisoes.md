@@ -26,3 +26,10 @@
 - Consequências: ORM e migrações ficam para a F1-01. O `/health/ready` cria o bucket se ele não existir
   (infraestrutura, idempotente). Autenticação do SeaweedFS S3 via `AWS_ACCESS_KEY_ID` e
   `AWS_SECRET_ACCESS_KEY` no contêiner `storage`, preenchidas com `S3_ACCESS_KEY`/`S3_SECRET_KEY`.
+- Exceção de licença certifi (MPL-2.0, copyleft fraco em nível de arquivo): dependência transitiva
+  de httpx/httpcore (extra `dev`), não modificada e fora do runtime da API. Status: PENDENTE DE
+  APROVAÇÃO HUMANA (ainda não aprovada).
+- Configuração: as settings ficaram em `inovalytics/api/config.py` (e não em `inovalytics/config.py`
+  como no backlog). `POSTGRES_PASSWORD`, `S3_ACCESS_KEY` e `S3_SECRET_KEY` são obrigatórias.
+- Dívida: a criação do bucket dentro de `/health/ready` é efeito colateral num endpoint de leitura;
+  mover para o startup da API ou para a F1-02.

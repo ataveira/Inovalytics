@@ -68,3 +68,9 @@ def test_volumes_and_only_api_published(compose: dict[str, Any]) -> None:
         assert "ports" not in services[name], name
     ports = services["api"]["ports"]
     assert len(ports) == 1 and ports[0].endswith(":8000")
+
+
+def test_storage_healthcheck_covers_master_and_s3_ports(compose: dict[str, Any]) -> None:
+    test = compose["services"]["storage"]["healthcheck"]["test"]
+    blob = " ".join(test) if isinstance(test, list) else str(test)
+    assert "9333" in blob and "8333" in blob

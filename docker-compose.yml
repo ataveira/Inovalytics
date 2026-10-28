@@ -28,7 +28,13 @@ services:
     volumes:
       - storage_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9333/cluster/status"]
+      # 9333: master; 8333: gateway S3. Sem credenciais o S3 responde 403, o que também prova que
+      # o gateway está de pé (qualquer resposta HTTP serve), por isso o grep em "HTTP/".
+      test:
+        - CMD-SHELL
+        - >-
+          wget -q -O /dev/null http://127.0.0.1:9333/cluster/status &&
+          wget -S -O /dev/null http://127.0.0.1:8333/ 2>&1 | grep -q 'HTTP/'
       interval: 5s
       timeout: 5s
       retries: 12

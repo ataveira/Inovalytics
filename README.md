@@ -26,3 +26,8 @@ pip install -e ".[dev]"
 make check   # ruff, mypy, pytest, eslint, vitest
 ```
 Copie `.env.example` para `.env` (nunca commitar). Layout e ferramentas: `docs/decisoes.md`.
+
+## Subir com Docker Compose
+
+Ver `docker/README.md`. Atenção: a porta da API é publicada em `0.0.0.0` por padrão; para
+restringir, use bind em `127.0.0.1` no mapeamento de portas e `API_PORT` para trocar a porta.

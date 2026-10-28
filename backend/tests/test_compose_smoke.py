@@ -56,6 +56,28 @@ def _status(path: str) -> int:
         return exc.code
 
 
+def _wait_status(path: str, expected: int, timeout: float = 60) -> int:
+    """Repete a requisição até obter `expected` ou estourar o prazo; devolve o último status."""
+    deadline = time.time() + timeout
+    status = _status(path)
+    while status != expected and time.time() < deadline:
+        time.sleep(1)
+        status = _status(path)
+    return status
+
+
+# Executado dentro do contêiner da API (o storage não é publicado no host): requisição S3
+# anônima (sem assinatura) a "/" (listar buckets) e ao bucket (listar objetos); imprime os status.
+_ANON_S3_PROBE = (
+    "import urllib.request as u, urllib.error as e\n"
+    "for p in ('/', '/inovalytics'):\n"
+    "    try:\n"
+    "        print(u.urlopen('http://storage:8333' + p, timeout=5).status)\n"
+    "    except e.HTTPError as x:\n"
+    "        print(x.code)\n"
+)
+
+
 @pytest.fixture
 def stack(repo_root: Path, env_file: Path) -> Iterator[None]:
     yield
@@ -68,7 +90,12 @@ def test_config_build_up_ready_and_down(repo_root: Path, env_file: Path, stack: 
     for _ in range(2):  # segundo ciclo prova idempotência a partir do zero
         up = _dc(repo_root, env_file, "up", "-d", "--wait", "--wait-timeout", "120")
         assert up.returncode == 0, up.stderr
-        assert _status("/health/ready") == 200
+        assert _wait_status("/health/ready", 200, timeout=60) == 200
+        # S3 anônimo (sem credenciais) não pode listar nem ler buckets.
+        probe = _dc(repo_root, env_file, "exec", "-T", "api", "python", "-c", _ANON_S3_PROBE)
+        assert probe.returncode == 0, probe.stderr
+        codes = [int(c) for c in probe.stdout.split()]
+        assert codes and all(c in (401, 403) for c in codes), codes
         assert _dc(repo_root, env_file, "stop", "db").returncode == 0
         deadline = time.time() + 30
         while _status("/health/ready") != 503 and time.time() < deadline:

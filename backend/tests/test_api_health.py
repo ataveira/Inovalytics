@@ -45,7 +45,12 @@ def test_ready_503_when_any_fails_without_leaking(failing: str) -> None:
 
 def test_settings_from_env_and_no_secret_in_repr() -> None:
     s = Settings.from_env(
-        {"POSTGRES_PASSWORD": "p@ss/w", "S3_LEAK_KEY": LEAK, "S3_ACCESS_KEY": "ak"}
+        {
+            "POSTGRES_PASSWORD": "p@ss/w",
+            "S3_LEAK_KEY": LEAK,
+            "S3_ACCESS_KEY": "ak",
+            "S3_SECRET_KEY": "sk",
+        }
     )
     assert "p%40ss%2Fw" in s.postgres_dsn
     assert s.s3_bucket == "inovalytics"

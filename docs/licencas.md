@@ -43,6 +43,9 @@ botocore 1.43.120 (Apache-2.0), s3transfer 0.19.3 (Apache-2.0), jmespath 1.1.0 (
 urllib3 2.8.0 (MIT), python-dateutil 2.9.0 (BSD-3-Clause ou Apache-2.0), six 1.17.0 (MIT),
 idna 3.20 (BSD-3-Clause), typing-extensions 4.16.0 (PSF-2.0), annotated-types (MIT),
 opentelemetry-api 1.45.1 (Apache-2.0). Exceção de copyleft fraco: certifi 2026.10.23 (MPL-2.0,
-nível de arquivo, sem modificação; vem via httpx/botocore). Nenhuma GPL/AGPL/SSPL.
+nível de arquivo, sem modificação). Verificado com `pip show certifi`: `Required-by: httpcore, httpx`;
+botocore 1.43.120 não o requer (usa urllib3). Como httpx está só no extra `dev`, certifi NÃO entra
+no runtime/imagem da API, apenas no ambiente de desenvolvimento e testes. Exceção pendente de
+aprovação humana (ver ADR-002). Nenhuma GPL/AGPL/SSPL.
 
 Observação: a licença do próprio Inovalytics é uma decisão pendente (ver `docs/spec.md`).
