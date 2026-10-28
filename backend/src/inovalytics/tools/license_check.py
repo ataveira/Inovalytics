@@ -121,6 +121,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--write", action="store_true", help="atualiza docs/licencas-transitivas.md")
     ap.add_argument("--prune", action="store_true", help="com --write, remove linhas sobrando")
     args = ap.parse_args(argv)
+    if args.prune and not args.write:
+        ap.error("--prune só tem efeito com --write")
     code, text = run(args.root, args.metadata_paths, write=args.write, prune=args.prune)
     print(text, file=sys.stderr if code == 2 else sys.stdout)
     return code

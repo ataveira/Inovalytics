@@ -205,3 +205,18 @@ def test_real_tree_is_clean_offline(
     assert "imagens: runtime 3, dev 0" in out and "actions: runtime 0, dev 3" in out
     assert "Exceções usadas: 2" in out and "certifi" in out and "pathspec" in out
     assert "Exceções sem uso" not in out
+
+
+def test_prune_without_write_is_a_usage_error(
+    fake_repo: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    root, site = fake_repo
+    with pytest.raises(SystemExit) as exc_info:
+        main(["--root", str(root), "--metadata-path", str(site), "--prune"])
+    assert exc_info.value.code == 2
+    assert "--prune" in capsys.readouterr().err
+
+
+def test_prune_with_write_is_accepted(fake_repo: tuple[Path, Path], no_network: None) -> None:
+    root, site = fake_repo
+    assert main(["--root", str(root), "--metadata-path", str(site), "--write", "--prune"]) == 0
