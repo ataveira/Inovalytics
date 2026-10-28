@@ -98,7 +98,9 @@ def build_registry(doc: LicencasDoc, trans: Mapping[str, TransRow]) -> Registry:
     for t in trans.values():
         reg[registry_key("python", t.name)] = RegEntry(t.name, t.spdx, t.group)
     for r in doc.deps:  # a tabela principal prevalece sobre a de transitivas
+        # A tabela de diretas mistura Python e npm; cada ecossistema a consulta com a sua chave.
         reg[registry_key("python", r.name)] = RegEntry(r.name, r.spdx, None)
+        reg[registry_key("npm", r.name)] = RegEntry(r.name, r.spdx, None)
     for r in doc.images:
         reg[registry_key("image", r.name)] = RegEntry(r.name, r.spdx, "runtime")
     for r in doc.actions:

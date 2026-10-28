@@ -412,3 +412,30 @@ def test_collector_issues_are_merged() -> None:
 def test_noncommercial_and_sspl_free_text_are_forbidden(expr: str) -> None:
     report = run([comp("meupkg", expression=expr)])
     assert [(v.code, v.package) for v in report.violations] == [(lp.PROIBIDA, "meupkg")]
+
+
+def test_npm_registry_key_does_not_fold_separators_or_share_python_namespace() -> None:
+    keys = {lp.registry_key("npm", n) for n in ("foo-bar", "foo_bar", "foo.bar")}
+    assert len(keys) == 3
+    assert lp.registry_key("npm", " @Scope/Pkg ") == lp.registry_key("npm", "@scope/pkg")
+    assert lp.registry_key("npm", "foo-bar") != lp.registry_key("python", "foo-bar")
+    assert lp.registry_key("python", "Foo_Bar") == lp.registry_key("python", "foo-bar")
+
+
+def test_npm_direct_dep_is_not_satisfied_by_similar_python_registry_entry() -> None:
+    reg = {lp.registry_key("python", "foo-bar"): RegEntry("foo-bar", "MIT", None)}
+    c = comp("foo_bar", ecosystem="npm", expression="MIT", needs_registry=True)
+    assert codes(run([c], reg)) == [(lp.NAO_REGISTRADO, "foo_bar")]
+    reg_npm = {lp.registry_key("npm", "foo_bar"): RegEntry("foo_bar", "MIT", None)}
+    assert run([c], reg_npm).ok
+
+
+def test_build_registry_exposes_direct_rows_to_npm_with_exact_names() -> None:
+    from inovalytics.tools import license_registry as lr
+
+    doc = lr.LicencasDoc(
+        deps=(lr.DocRow("@eslint/js", "9", "MIT", "https://x"),), images=(), actions=()
+    )
+    reg = lr.build_registry(doc, {})
+    assert lp.registry_key("npm", "@eslint/js") in reg
+    assert lp.registry_key("npm", "@eslint_js") not in reg

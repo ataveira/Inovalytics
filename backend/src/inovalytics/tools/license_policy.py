@@ -352,8 +352,11 @@ def pep503(name: str) -> str:
 
 
 def registry_key(ecosystem: str, name: str) -> tuple[str, str]:
-    kind = "pkg" if ecosystem in ("python", "npm") else ecosystem
-    return (kind, name.strip().lower() if kind != "pkg" else pep503(name))
+    # Python usa PEP 503 (separadores equivalentes). npm só ignora caixa e espaços: "a-b", "a_b" e
+    # "a.b" são pacotes distintos no npm e não podem colidir entre si nem com um pacote Python.
+    if ecosystem == "python":
+        return ("pkg", pep503(name))
+    return (ecosystem, name.strip().lower())
 
 
 # ---------------------------------------------------------------- resolução por componente
