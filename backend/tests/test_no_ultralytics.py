@@ -22,7 +22,7 @@ def is_dependency_file(p: Path) -> bool:
 def _targets(root: Path) -> list[Path]:
     files = [root / "pyproject.toml", root / "frontend" / "package.json"]
     self_path = Path(__file__).resolve()
-    for d in ("backend", "docker"):
+    for d in ("backend", "docker", ".github"):
         files += [
             p
             for p in (root / d).rglob("*")
