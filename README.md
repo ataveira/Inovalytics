@@ -18,3 +18,11 @@
 - Rodar a F0-01 e ajustar o `Makefile` à estrutura criada.
 - Adicionar GitHub Actions para rodar o ciclo em pull requests.
 - Para orquestração por código, migrar o fluxo para o Agent SDK.
+
+## Desenvolvimento
+```
+python -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev]"
+make check   # ruff, mypy, pytest, eslint, vitest
+```
+Copie `.env.example` para `.env` (nunca commitar). Layout e ferramentas: `docs/decisoes.md`.
