@@ -60,8 +60,8 @@ DEFAULT_POLICY = Policy(
 # ---------------------------------------------------------------- normalização
 
 _FORBIDDEN_RE = re.compile(
-    r"(agpl|\bgpl|lgpl|sspl|busl|business source|non-?commercial|proprietary|\bgnu\b|affero"
-    r"|-nc(?![a-z]))",
+    r"(agpl|\bgpl|lgpl|sspl|busl|business source|non[-_ ]?commercial"
+    r"|server[-_ ]side[-_ ]public|proprietary|\bgnu\b|affero|-nc(?![a-z]))",
     re.IGNORECASE,
 )
 _EMPTY = {"", "unknown", "none", "n/a", "na", "null"}

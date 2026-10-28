@@ -396,3 +396,19 @@ def test_registry_with_forbidden_or_invalid_spdx_fails(spdx: str, code: str) -> 
 def test_collector_issues_are_merged() -> None:
     issue = Violation(lp.NAO_REGISTRADO, "image", "runtime", "img", "1", "img: sem linha")
     assert codes(run([], issues=(issue,))) == [(lp.NAO_REGISTRADO, "img")]
+
+
+@pytest.mark.parametrize(
+    "expr",
+    [
+        "Non Commercial",
+        "Non-Commercial Use Only",
+        "NonCommercial",
+        "Server Side Public License",
+        "Server-Side-Public-License v1",
+        "server side public license, v 1",
+    ],
+)
+def test_noncommercial_and_sspl_free_text_are_forbidden(expr: str) -> None:
+    report = run([comp("meupkg", expression=expr)])
+    assert [(v.code, v.package) for v in report.violations] == [(lp.PROIBIDA, "meupkg")]
