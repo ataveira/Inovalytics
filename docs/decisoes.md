@@ -105,6 +105,23 @@
 - Registro de transitivas Python: `docs/licencas-transitivas.md`, gerado por `make licencas-sync`
   (união, nunca apaga; `--prune` explícito). Sem versão, de propósito. Rodar nos Python 3.11 e 3.12
   e commitar, pois marcadores de ambiente mudam a árvore. A verificação nunca escreve.
+- Correções pós-revisão (escopo e limites):
+  - Ids SPDX não comerciais (`CC-BY-NC-*`, `CC-BY-NC-SA-*`, `CC-BY-NC-ND-*` e qualquer id com `-NC`)
+    são PROIBIDA, nunca DESCONHECIDA, e nenhuma exceção os cobre.
+  - O registro das diretas é comparado também sob exceção: a linha de `docs/licencas.md` (ou de
+    transitivas) deve ser igual à `licenca_verificada` da exceção. Para transitiva com licença
+    ausente ou desconhecida coberta por exceção válida, `make licencas-sync` grava a
+    `licenca_verificada`; sem exceção a linha fica `AUSENTE`/`DESCONHECIDA` e o gate falha. O modo de
+    verificação continua sem escrever.
+  - Imagens: a linha do registro casa de forma exata pelo repositório completo (namespace incluído;
+    `evil/python` não herda a linha de `python`); sem casamento exato, a imagem é não registrada e
+    o gate falha.
+  - Escopo ampliado da descoberta de imagens (falha fechada): `Dockerfile`, `Dockerfile.*` e
+    `*.Dockerfile` sob `docker/` (recursivo) e na raiz; `docker-compose*.yml|yaml` e
+    `compose*.yml|yaml` na raiz e sob `docker/`.
+  - Limite conhecido: lista de licenças em array no npm (`"license": [...]`) vira `OR` (basta uma
+    permitida), coerente com o comportamento do npm legado; não há como saber offline se o autor
+    quis `AND`.
 - Limites: metadado que mente não é detectável; nenhuma licença é inferida por nome, página ou
   arquivo LICENSE; auditoria completa e revisão jurídica ficam para a F6-05.
 - Consequência: `packaging` passa a ser importado (extra `dev`, registrado em `docs/licencas.md`);

@@ -81,7 +81,7 @@ Decisões já fechadas desde o plano original (registradas em `docs/decisoes.md`
 
 - **Armazenamento de arquivos:** SeaweedFS (Apache-2.0), acessado por API S3 com boto3 e variáveis `S3_*`. MinIO e Garage (AGPL-3.0) ficaram de fora (ADR-002).
 - **Driver do PostgreSQL:** asyncpg (Apache-2.0). psycopg (LGPL-3.0) ficou de fora (ADR-002).
-- **Exceção de licença aprovada:** certifi (MPL-2.0), dependência transitiva usada só em desenvolvimento, sem modificação (ADR-002).
+- **Exceções de licença aprovadas (duas):** certifi (MPL-2.0, ADR-002) e pathspec 1.1.1 (MPL-2.0, ADR-004), dependências transitivas usadas só em desenvolvimento, sem modificação.
 - **Exposição da API:** porta publicada apenas em `127.0.0.1` por padrão; abrir para a rede exige `API_BIND` explícito.
 - **CI:** GitHub Actions com `gate` (Python 3.11 e 3.12, `make check`) e `compose-smoke` (ADR-003). O `Makefile` é a fonte da verdade e o CI é portável.
 - **Proteção do `main`:** ruleset exigindo `gate (python 3.11)`, `gate (python 3.12)` e `compose-smoke`, sem force push e sem exclusão.

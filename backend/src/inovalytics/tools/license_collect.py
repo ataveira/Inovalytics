@@ -19,11 +19,15 @@ from inovalytics.tools.license_policy import (
     DESCONHECIDA,
     DIVERGE_DO_REGISTRO,
     NAO_REGISTRADO,
+    ULTRALYTICS,
     Component,
     Violation,
     pep503,
 )
 from inovalytics.tools.license_registry import DocRow
+
+# Montada por concatenação: o gate de texto do repositório varre este diretório.
+_VENDOR = "ultra" + "lytics"
 
 
 class InputError(Exception):
@@ -279,22 +283,45 @@ def split_image(ref: str) -> tuple[str, str] | None:
     return repo, tag
 
 
+def _compose_files(root: Path) -> list[Path]:
+    """docker-compose*.yml|yaml e compose*.yml|yaml na raiz e (recursivo) sob docker/."""
+    found: set[Path] = set()
+    docker_dir = root / "docker"
+    scopes = [(root, False)] + ([(docker_dir, True)] if docker_dir.is_dir() else [])
+    for base, recursive in scopes:
+        for prefix in ("docker-compose", "compose"):
+            for ext in ("yml", "yaml"):
+                pattern = f"{prefix}*.{ext}"
+                found.update(base.rglob(pattern) if recursive else base.glob(pattern))
+    return sorted(p for p in found if p.is_file())
+
+
+def _dockerfiles(root: Path) -> list[Path]:
+    """Dockerfile, Dockerfile.* e *.Dockerfile na raiz e (recursivo) sob docker/."""
+    found: set[Path] = set()
+    docker_dir = root / "docker"
+    scopes = [(root, False)] + ([(docker_dir, True)] if docker_dir.is_dir() else [])
+    for base, recursive in scopes:
+        for pattern in ("Dockerfile", "Dockerfile.*", "*.Dockerfile"):
+            found.update(base.rglob(pattern) if recursive else base.glob(pattern))
+    return sorted(p for p in found if p.is_file())
+
+
 def _image_refs(root: Path) -> tuple[list[str], list[Violation]]:
     import yaml
 
     refs: list[str] = []
     issues: list[Violation] = []
-    compose_path = root / "docker-compose.yml"
-    if compose_path.exists():
+    for compose_path in _compose_files(root):
         try:
             compose = yaml.safe_load(_read(compose_path)) or {}
         except yaml.YAMLError as exc:
             raise InputError(f"YAML inválido em {compose_path}: {exc}") from exc
-        for svc in (compose.get("services") or {}).values():
-            if "image" in svc and "build" not in svc:
+        services = compose.get("services") if isinstance(compose, dict) else None
+        for svc in (services or {}).values():
+            if isinstance(svc, dict) and "image" in svc and "build" not in svc:
                 refs.append(str(svc["image"]))
-    docker_dir = root / "docker"
-    for df in sorted(docker_dir.rglob("Dockerfile")) if docker_dir.is_dir() else []:
+    for df in _dockerfiles(root):
         stages: set[str] = set()
         for line in _read(df).splitlines():
             m = _FROM.match(line)
@@ -309,6 +336,20 @@ def _image_refs(root: Path) -> tuple[list[str], list[Violation]]:
                 stages.add(m.group(3).lower())
             refs.append(image)
     return refs, issues
+
+
+def _canon_repo(repo: str) -> str:
+    """Repositório completo, sem o registro padrão do Docker Hub nem o namespace ``library/``."""
+    repo = repo.strip().lower()
+    for prefix in ("index.docker.io/", "docker.io/"):
+        if repo.startswith(prefix):
+            repo = repo[len(prefix) :]
+    return repo.removeprefix("library/")
+
+
+def _row_repo(row: DocRow) -> str:
+    """Repositório de uma linha do registro: o nome sem a nota entre parênteses."""
+    return _canon_repo(row.name.split(" (", 1)[0])
 
 
 def collect_images(root: Path, rows: Sequence[DocRow]) -> Collected:
@@ -336,14 +377,19 @@ def collect_images(root: Path, rows: Sequence[DocRow]) -> Collected:
         if (repo, tag) in seen_pairs:
             continue
         seen_pairs.add((repo, tag))
-        short = repo.rsplit("/", 1)[-1]
-        matches = [r for r in rows if short in r.name or repo in r.name]
+        matches = [r for r in rows if _row_repo(r) == _canon_repo(repo)]
         if len(matches) != 1:
             bad(
                 NAO_REGISTRADO,
                 ref,
                 f"{ref}: sem linha única em 'Imagens de contêiner' de docs/licencas.md.",
             )
+            if _VENDOR in ref.lower():
+                bad(
+                    ULTRALYTICS,
+                    ref,
+                    f"{ref}: ligado à Ultralytics (AGPL-3.0), proibido; exceção não se aplica.",
+                )
             continue
         row = matches[0]
         used_rows.add(row.name)

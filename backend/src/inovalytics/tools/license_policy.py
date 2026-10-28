@@ -60,7 +60,8 @@ DEFAULT_POLICY = Policy(
 # ---------------------------------------------------------------- normalização
 
 _FORBIDDEN_RE = re.compile(
-    r"(agpl|\bgpl|lgpl|sspl|busl|business source|non-?commercial|proprietary|\bgnu\b|affero)",
+    r"(agpl|\bgpl|lgpl|sspl|busl|business source|non-?commercial|proprietary|\bgnu\b|affero"
+    r"|-nc(?![a-z]))",
     re.IGNORECASE,
 )
 _EMPTY = {"", "unknown", "none", "n/a", "na", "null"}
@@ -560,6 +561,82 @@ def _declared_matches(exc: ValidException, c: Component) -> bool:
     return any(want == d.strip().lower() for d in declared_strings(c))
 
 
+def validate_exceptions(
+    exceptions: Sequence[Mapping[str, object]], today: date, policy: Policy
+) -> tuple[list[ValidException], list[Violation]]:
+    """Separa as exceções válidas (únicas) das inválidas, que viram ``EXCECAO_INVALIDA``."""
+    valid: list[ValidException] = []
+    problems: list[Violation] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for raw in exceptions:
+        exc, eco, pkg, error = _validate_exception(raw, today, policy)
+        if exc is None:
+            problems.append(
+                Violation(
+                    EXCECAO_INVALIDA,
+                    eco,
+                    str(raw.get("grupo") or ""),
+                    pkg,
+                    "",
+                    f"Exceção inválida para {pkg}: {error}.",
+                )
+            )
+            continue
+        key = (exc.ecosystem, exc.package, exc.group, exc.versions)
+        if key in seen:
+            problems.append(
+                Violation(
+                    EXCECAO_INVALIDA,
+                    exc.ecosystem,
+                    exc.group,
+                    exc.package,
+                    "",
+                    f"Exceção duplicada para {exc.package} ({exc.versions}, {exc.group}).",
+                )
+            )
+            continue
+        seen.add(key)
+        valid.append(exc)
+    return valid, problems
+
+
+def vendor_hit(c: Component) -> bool:
+    """Ultralytics: nunca suprimível por exceção."""
+    name_n = pep503(c.name.split("/")[-1] if c.ecosystem == "action" else c.name)
+    return (
+        name_n.startswith(_FORBIDDEN_VENDOR)
+        or _mentions_vendor(c.name)
+        or any(_mentions_vendor(r) for r in c.references)
+    )
+
+
+def license_fails(c: Component, res: Resolution, policy: Policy) -> bool:
+    """True se a licença resolvida não passa sozinha (sem exceção)."""
+    if not c.installed or res.tree is None:
+        return True
+    return not evaluate(res.tree, lambda lf: lf.id in policy.allowed)
+
+
+def find_exception(
+    valid: Sequence[ValidException], c: Component, res: Resolution
+) -> ValidException | None:
+    """Exceção válida que cobre o componente; nunca para licença proibida nem Ultralytics."""
+    if c.group not in GROUPS or vendor_hit(c):
+        return None
+    if res.tree is not None and any(lf.forbidden for lf in leaves(res.tree)):
+        return None
+    for exc in valid:
+        if (
+            exc.ecosystem == c.ecosystem
+            and exc.package == pep503(c.name)
+            and exc.group == c.group
+            and version_matches(c.ecosystem, exc.versions, c.version)
+            and _declared_matches(exc, c)
+        ):
+            return exc
+    return None
+
+
 # ---------------------------------------------------------------- verify
 
 
@@ -580,39 +657,11 @@ def verify(
     notes: list[str] = []
     counts: dict[tuple[str, str], int] = {(e, g): 0 for e in ECOSYSTEMS for g in GROUPS}
 
-    valid: list[ValidException] = []
-    seen: set[tuple[str, str, str, str]] = set()
-    for raw in exceptions:
-        exc, eco, pkg, error = _validate_exception(raw, today, policy)
-        if exc is None:
-            violations.append(
-                Violation(
-                    EXCECAO_INVALIDA,
-                    eco,
-                    str(raw.get("grupo") or ""),
-                    pkg,
-                    "",
-                    f"Exceção inválida para {pkg}: {error}.",
-                )
-            )
-            continue
-        key = (exc.ecosystem, exc.package, exc.group, exc.versions)
-        if key in seen:
-            violations.append(
-                Violation(
-                    EXCECAO_INVALIDA,
-                    exc.ecosystem,
-                    exc.group,
-                    exc.package,
-                    "",
-                    f"Exceção duplicada para {exc.package} ({exc.versions}, {exc.group}).",
-                )
-            )
-            continue
-        seen.add(key)
-        valid.append(exc)
+    valid, exc_violations = validate_exceptions(exceptions, today, policy)
+    violations.extend(exc_violations)
 
     used: set[str] = set()
+    covering: dict[int, ValidException] = {}
 
     for reg_entry in registry.values():
         norm = normalize(reg_entry.spdx, policy)
@@ -668,14 +717,8 @@ def verify(
         else:
             counts[(c.ecosystem, group)] = counts.get((c.ecosystem, group), 0) + 1
 
-        # Ultralytics: nunca suprimível por exceção.
-        name_n = pep503(c.name.split("/")[-1] if c.ecosystem == "action" else c.name)
-        vendor_hit = (
-            name_n.startswith(_FORBIDDEN_VENDOR)
-            or _mentions_vendor(c.name)
-            or any(_mentions_vendor(r) for r in c.references)
-        )
-        if vendor_hit:
+        is_vendor = vendor_hit(c)
+        if is_vendor:
             add(
                 ULTRALYTICS,
                 f"{c.name}: ligado à Ultralytics (AGPL-3.0), proibido; exceção não se aplica.",
@@ -712,21 +755,10 @@ def verify(
                 else "fora da lista permitida."
             )
         if fail_code:
-            forbidden = res.tree is not None and any(lf.forbidden for lf in leaves(res.tree))
-            match = None
-            if not forbidden and not vendor_hit and group is not None:
-                for exc in valid:
-                    if (
-                        exc.ecosystem == c.ecosystem
-                        and exc.package == pep503(c.name)
-                        and exc.group == group
-                        and version_matches(c.ecosystem, exc.versions, c.version)
-                        and _declared_matches(exc, c)
-                    ):
-                        match = exc
-                        break
+            match = find_exception(valid, c, res)
             if match is not None:
                 used.add(match.label)
+                covering[id(c)] = match
             else:
                 add(fail_code, fail_msg)
 
@@ -736,7 +768,16 @@ def verify(
                 add(NAO_REGISTRADO, f"{c.name}: não está registrado na documentação de licenças.")
             else:
                 reg = normalize(entry.spdx, policy)
-                if res.tree is not None and reg.tree is not None:
+                covered = covering.get(id(c))
+                if covered is not None and reg.tree is not None:
+                    # Sob exceção, o registro vale contra a licenca_verificada (também nas diretas).
+                    if canonical(reg.tree) != covered.verified:
+                        add(
+                            DIVERGE_DO_REGISTRO,
+                            f"{c.name}: registro ({entry.spdx}) difere da licenca_verificada da "
+                            f"exceção ({covered.verified}).",
+                        )
+                elif res.tree is not None and reg.tree is not None:
                     same = (
                         canonical(res.tree) == canonical(reg.tree)
                         if res.by_expression

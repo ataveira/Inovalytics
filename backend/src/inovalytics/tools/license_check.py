@@ -23,6 +23,7 @@ from inovalytics.tools.license_policy import (
     GROUPS,
     Report,
     Snapshot,
+    validate_exceptions,
     verify,
 )
 from inovalytics.tools.license_registry import (
@@ -94,7 +95,8 @@ def run(
 
     trans = parse_transitivas(trans_text)
     if write:
-        merged = merge_rows(trans, generate_rows(py.components), prune=prune)
+        valid, _ = validate_exceptions(exceptions, date.today(), DEFAULT_POLICY)
+        merged = merge_rows(trans, generate_rows(py.components, valid), prune=prune)
         new_text = render_transitivas(merged)
         if new_text != trans_text:
             trans_path.write_text(new_text, encoding="utf-8")

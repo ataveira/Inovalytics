@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from inovalytics.tools.license_policy import (
     DEFAULT_POLICY,
     Component,
+    Policy,
     RegEntry,
     Registry,
     Resolution,
+    ValidException,
+    find_exception,
     id_set,
+    license_fails,
     pep503,
     registry_key,
     render,
@@ -112,14 +116,28 @@ def license_text(c: Component, res: Resolution | None = None) -> str:
     return " OR ".join(sorted(id_set(res.tree)))
 
 
-def generate_rows(components: Iterable[Component]) -> dict[str, TransRow]:
-    """Linhas das transitivas Python (não diretas) a partir dos componentes coletados."""
+def generate_rows(
+    components: Iterable[Component],
+    exceptions: Sequence[ValidException] = (),
+    policy: Policy = DEFAULT_POLICY,
+) -> dict[str, TransRow]:
+    """Linhas das transitivas Python (não diretas) a partir dos componentes coletados.
+
+    Com exceção válida cobrindo o componente (e a licença não passando sozinha), grava a
+    ``licenca_verificada`` da exceção; sem exceção, grava o que os metadados dizem (falha fechada).
+    """
     rows: dict[str, TransRow] = {}
     for c in components:
         if c.ecosystem != "python" or c.direct or not c.installed:
             continue
+        res = resolve(c, policy)
+        text = license_text(c, res)
+        if license_fails(c, res, policy):
+            exc = find_exception(exceptions, c, res)
+            if exc is not None:
+                text = exc.verified
         rows[pep503(c.name)] = TransRow(
-            pep503(c.name), license_text(c), c.group or "dev", tuple(sorted(c.required_by))
+            pep503(c.name), text, c.group or "dev", tuple(sorted(c.required_by))
         )
     return rows
 
