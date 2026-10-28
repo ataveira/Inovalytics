@@ -107,6 +107,10 @@ Pinagem: major
   linha "Pinagem:" acima; trocar para SHA exige mudar essa linha, os `uses:` e `licencas.md`.
 - `actions/upload-artifact` (MIT, oficial) publica `smoke.xml` como `smoke-junit` (retenção 7 dias,
   `if: always()` filtrado pelo smoke, `if-no-files-found: ignore`). Sem permissão extra.
+- Segredos no artefato: `smoke.xml` (e portanto o artefato `smoke-junit`) só contém credenciais
+  descartáveis geradas ao acaso a cada execução do smoke, que vivem apenas no contêiner efêmero. Os
+  testes de vazamento não imprimem o valor do segredo nem a saída da API na mensagem de falha
+  (`pytest.fail` com texto fixo), para que nem o JUnit nem o log exponham o valor.
 - Diagnóstico robusto: tolera `smoke.xml` ausente ou truncado (`ParseError`), só roda em falha e sem
   segredos. Timeouts: `gate` 15 min e `compose-smoke` 25 min (teto testado).
 - Pendências do humano (não implementadas; registrar evidência aqui):

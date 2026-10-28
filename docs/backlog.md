@@ -13,7 +13,7 @@ Revisado contra `docs/spec.md` em 28/10/2026. A partir desta revisão, as fases 
 **Fatos informados pelo humano (28/10/2026)**
 - Os modelos de analítico do iNVR são ONNX treinados no Google Colab. O framework de treino, os pesos iniciais e o dataset usados nesses notebooks ainda não estão comprovados; a origem e a licença dependem dos notebooks e dos registros do Colab (ver F1-02 e F5-12 a F5-14). Isso não permite concluir se os modelos são ou não derivados da Ultralytics.
 
-**Próxima tarefa executável: F0-06.**
+**Próxima tarefa executável: F1-01.** (F0-06 está parcialmente concluída `[~]`: o que cabe ao repositório está feito; restam só as pendências do humano H1 a H6, que não bloqueiam as demais tarefas. F1-01 não depende de D1 a D5.)
 
 ## Fase 0: Fundação técnica (pré-requisito da Fase 1 do plano)
 - [x] F0-01 Estrutura do repositório (backend/, frontend/, docs/, docker/), `pyproject.toml`, ruff, mypy, pytest
