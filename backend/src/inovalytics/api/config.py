@@ -28,6 +28,42 @@ def _positive(e: Mapping[str, str], name: str, default: float, *, integer: bool)
 
 
 @dataclass(frozen=True)
+class PostgresSettings:
+    """Só as variáveis POSTGRES_*: a CLI de migração (F1-04b) não exige as chaves S3."""
+
+    host: str = "db"
+    port: int = 5432
+    user: str = "inovalytics"
+    password: str = field(default="", repr=False)
+    database: str = "inovalytics"
+
+    @property
+    def dsn(self) -> str:
+        """DSN completo. Contém a senha: nunca logar nem imprimir."""
+        user = quote(self.user, safe="")
+        password = quote(self.password, safe="")
+        return f"postgresql://{user}:{password}@{self.host}:{self.port}/{self.database}"
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str] | None = None) -> PostgresSettings:
+        e = os.environ if env is None else env
+        d = cls()
+        if not e.get("POSTGRES_PASSWORD"):
+            raise ValueError("variável de ambiente obrigatória ausente ou vazia: POSTGRES_PASSWORD")
+        try:
+            port = int(e.get("POSTGRES_PORT") or d.port)
+        except ValueError:
+            raise ValueError("valor inválido (não numérico) em POSTGRES_PORT") from None
+        return cls(
+            host=e.get("POSTGRES_HOST") or d.host,
+            port=port,
+            user=e.get("POSTGRES_USER") or d.user,
+            password=e["POSTGRES_PASSWORD"],
+            database=e.get("POSTGRES_DB") or d.database,
+        )
+
+
+@dataclass(frozen=True)
 class Settings:
     postgres_host: str = "db"
     postgres_port: int = 5432

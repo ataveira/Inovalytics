@@ -3,11 +3,16 @@ NPM_FRONT = npm --prefix frontend
 # Só para `licencas-sync` (ex.: LICENCAS_ARGS=--prune). O alvo `licencas` não aceita argumentos.
 LICENCAS_ARGS ?=
 
-.PHONY: compose-smoke test lint check lint-backend lint-frontend typecheck test-frontend frontend-deps licencas licencas-sync
+.PHONY: compose-smoke test lint check lint-backend lint-frontend typecheck test-frontend frontend-deps licencas licencas-sync migrate
 
 # Fora do `make check`: exige Docker (pula os testes se ausente).
 compose-smoke:
 	$(PYTHON) -m pytest -m docker backend/tests/test_compose_smoke.py
+
+# Migrações do banco (F1-04b, ADR-006): comando separado, nunca no startup da API.
+# Lê POSTGRES_* do ambiente. Para reverter (só dev/teste): python -m inovalytics.db.migrate down --steps N
+migrate:
+	$(PYTHON) -m inovalytics.db.migrate up
 
 test:
 	$(PYTHON) -m pytest
