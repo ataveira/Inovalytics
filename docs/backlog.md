@@ -70,7 +70,7 @@ Status: [ ] pendente · [~] em andamento · [x] concluída
     - Se o humano preferir manter o MinIO (por maturidade ou pelo CLAUDE.md), aceitar apenas como serviço externo separado, imagem oficial sem modificação, em perfil opcional do compose (`profiles: ["minio"]`), com ADR-002 registrando: sem patches, sem inclusão no instalador sem cumprir AGPL, e aviso em `licencas.md`.
     - Ação necessária do humano: aprovar o ADR-002 e, se a escolha for SeaweedFS, atualizar a linha "Stack padrão" do CLAUDE.md. O implementador não deve alterar o CLAUDE.md sozinho.
   - **Fora de escopo:** migrações, modelo de dados, upload de imagens, autenticação, TLS/proxy reverso, CI (F0-03), verificação automática de licenças (F0-04).
-- [~] F0-03 CI no GitHub Actions rodando `make check`
+- [x] F0-03 CI no GitHub Actions rodando `make check` (critérios 15-17: verificação humana no GitHub pendente)
   - **Dependências:** F0-01 e F0-02 (concluídas). **Tamanho:** menos de 1 dia; não dividir, mas 2 commits (workflow + testes estáticos; docs/ADR/licenças).
   - **Objetivo:** todo push e pull request roda o mesmo gate local (`make check`) em ambiente limpo, com permissões mínimas, sem segredos e sem Ultralytics; o fluxo de Compose com Docker (`make compose-smoke`) roda em job separado que não bloqueia o gate rápido.
   - **Decisões de projeto:**
