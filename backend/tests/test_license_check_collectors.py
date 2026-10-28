@@ -204,6 +204,23 @@ def test_npm_non_registry_source_fails_closed(tmp_path: Path, resolved: str) -> 
     assert [(v.code, v.package) for v in col.issues] == [(lp.DESCONHECIDA, "x")]
 
 
+@pytest.mark.parametrize("bad", ["MIT", None, 42, ["MIT"], True])
+def test_npm_non_dict_lock_entry_is_input_error(tmp_path: Path, bad: object) -> None:
+    write_npm(
+        tmp_path, {"node_modules/ok": {"version": "1", "license": "MIT"}, "node_modules/x": bad}
+    )
+    with pytest.raises(lc.InputError, match="node_modules/x"):
+        lc.collect_npm(tmp_path)
+
+
+def test_npm_non_dict_packages_is_input_error(tmp_path: Path) -> None:
+    write_npm(tmp_path, {})
+    lock = tmp_path / "frontend" / "package-lock.json"
+    lock.write_text(json.dumps({"lockfileVersion": 3, "packages": ["x"]}), encoding="utf-8")
+    with pytest.raises(lc.InputError):
+        lc.collect_npm(tmp_path)
+
+
 def test_npm_declared_dependency_missing_from_lock(tmp_path: Path) -> None:
     write_npm(tmp_path, {}, devDependencies={"faltando": "^1"})
     col = lc.collect_npm(tmp_path)

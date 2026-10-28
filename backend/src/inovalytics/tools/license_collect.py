@@ -223,6 +223,14 @@ def collect_npm(root: Path, frontend: str = "frontend") -> Collected:
     for key in ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies"):
         declared |= set(package_json.get(key, {}))
     packages: dict[str, Any] = lock.get("packages", {})
+    if not isinstance(packages, dict):
+        raise InputError("package-lock.json: 'packages' deve ser um objeto.")
+    for pkey, pentry in packages.items():
+        if not isinstance(pentry, dict):
+            raise InputError(
+                f"package-lock.json: entrada {pkey!r} inválida (esperado objeto, "
+                f"veio {type(pentry).__name__})."
+            )
     issues: list[Violation] = []
     comps: list[Component] = []
     top_level = {_npm_name(k) for k in packages if k.count("node_modules/") == 1}
