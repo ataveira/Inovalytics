@@ -156,7 +156,10 @@ def test_no_ultralytics_in_scan_targets_exist(repo_root: Path) -> None:
 
 
 def test_no_stale_rows_in_licencas(repo_root: Path) -> None:
-    stale = lic._rows(repo_root).keys() - lic._declared(repo_root)
+    text = (repo_root / "docs" / "licencas.md").read_text(encoding="utf-8")
+    section = text.split("## Imagens de contêiner", 1)[-1].split("\n## ", 1)[0]
+    images = {lic._norm(m.group(1)) for m in map(lic.ROW_RE.match, section.splitlines()) if m}
+    stale = lic._rows(repo_root).keys() - lic._declared(repo_root) - images
     # typescript e @eslint/js etc. são declarados; qualquer linha sobrando é lixo.
     assert not stale, stale
 

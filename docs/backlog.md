@@ -30,7 +30,7 @@ Status: [ ] pendente · [~] em andamento · [x] concluída
     - Não copiar templates, configs ou scaffolding de repositórios da Ultralytics ou de outras fontes sem licença clara; escrever a configuração do zero.
     - Declarar a licença do próprio projeto só depois de resolvida a decisão pendente em `docs/spec.md` (código aberto ou fechado); em `pyproject.toml` deixar o campo de licença fora ou marcado como pendente, sem presumir.
     - A spec (`docs/spec.md`) ainda é um placeholder; as decisões de layout acima devem ser registradas em ADR para revisão.
-- [~] F0-02 `docker-compose.yml` com PostgreSQL, armazenamento S3 e API FastAPI (healthcheck)
+- [x] F0-02 `docker-compose.yml` com PostgreSQL, armazenamento S3 e API FastAPI (healthcheck)
   - **Dependências:** F0-01 (concluída). **Tamanho:** cerca de 1 dia; não dividir, mas implementar em 3 commits (API + testes; Dockerfile + compose; docs/ADR/licenças).
   - **Objetivo:** subir com `docker compose up` três serviços (PostgreSQL, armazenamento compatível com S3 e API FastAPI) com healthcheck em todos, credenciais só via `.env`, sem lógica de negócio (modelo de dados fica na F1-01, upload na F1-02).
   - **Decisão prévia (ADR-002, depende de aprovação humana):** ver "Recomendação sobre o MinIO" abaixo. O compose usa variáveis `S3_*` genéricas, para que o backend não dependa do servidor escolhido.

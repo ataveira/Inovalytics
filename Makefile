@@ -1,7 +1,11 @@
 PYTHON ?= python
 NPM_FRONT = npm --prefix frontend
 
-.PHONY: test lint check lint-backend lint-frontend typecheck test-frontend frontend-deps
+.PHONY: compose-smoke test lint check lint-backend lint-frontend typecheck test-frontend frontend-deps
+
+# Fora do `make check`: exige Docker (pula os testes se ausente).
+compose-smoke:
+	$(PYTHON) -m pytest -m docker backend/tests/test_compose_smoke.py
 
 test:
 	$(PYTHON) -m pytest
