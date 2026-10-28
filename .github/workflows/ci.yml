@@ -91,4 +91,17 @@ jobs:
           pip install -e ".[dev]"
       - name: Smoke do Compose
         if: steps.filter.outputs.run == 'true'
+        env:
+          PYTEST_ADDOPTS: --junitxml=smoke.xml
         run: make compose-smoke
+      - name: Diagnóstico do smoke (só em falha)
+        if: failure() && steps.filter.outputs.run == 'true'
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          for case in ET.parse("smoke.xml").iter("testcase"):
+              for f in list(case.iter("failure")) + list(case.iter("error")):
+                  text = (f.get("message") or "") + "\n" + (f.text or "")
+                  lines = [x for x in text.splitlines() if x.strip()][-25:]
+                  print("::error::" + case.get("name", "?") + " | " + " ⏎ ".join(lines)[:3500].replace("%", "%25"))
+          PY

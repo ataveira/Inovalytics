@@ -10,6 +10,23 @@ from urllib.parse import quote
 _REQUIRED = ("POSTGRES_PASSWORD", "S3_ACCESS_KEY", "S3_SECRET_KEY")
 
 
+def _positive(e: Mapping[str, str], name: str, default: float, *, integer: bool) -> float:
+    """Lê um número positivo do ambiente; o erro cita só o NOME da variável.
+
+    Ausente ou string vazia (ex.: `S3_STARTUP_TIMEOUT=` no .env) vale como não definida: padrão.
+    """
+    raw = e.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        value = int(raw) if integer else float(raw)
+    except ValueError:
+        raise ValueError(f"valor inválido (não numérico) em {name}") from None
+    if not value > 0 or value == float("inf"):
+        raise ValueError(f"valor inválido (deve ser positivo) em {name}")
+    return value
+
+
 @dataclass(frozen=True)
 class Settings:
     postgres_host: str = "db"
@@ -22,6 +39,8 @@ class Settings:
     s3_secret_key: str = field(default="", repr=False)
     s3_bucket: str = "inovalytics"
     check_timeout: float = 3.0
+    s3_startup_timeout: float = 30.0
+    s3_startup_retries: int = 5
 
     @property
     def postgres_dsn(self) -> str:
@@ -52,4 +71,10 @@ class Settings:
             s3_secret_key=e["S3_SECRET_KEY"],
             s3_bucket=e.get("S3_BUCKET", d.s3_bucket),
             check_timeout=float(e.get("HEALTH_CHECK_TIMEOUT", d.check_timeout)),
+            s3_startup_timeout=_positive(
+                e, "S3_STARTUP_TIMEOUT", d.s3_startup_timeout, integer=False
+            ),
+            s3_startup_retries=int(
+                _positive(e, "S3_STARTUP_RETRIES", d.s3_startup_retries, integer=True)
+            ),
         )
