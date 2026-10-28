@@ -374,7 +374,7 @@ def collect_images(root: Path, rows: Sequence[DocRow]) -> Collected:
         if ref in seen:
             continue
         seen.add(ref)
-        # Antes de qualquer `continue`: referência sem tag, com variável ou não registrada também conta.
+        # Antes de qualquer `continue`: sem tag, com variável ou não registrada também conta.
         if _VENDOR in ref.lower():
             bad(
                 ULTRALYTICS,
