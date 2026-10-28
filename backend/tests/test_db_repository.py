@@ -98,6 +98,7 @@ def test_public_api_is_async_and_typed() -> None:
     names = [
         "create_project", "get_project", "list_projects", "delete_project", "create_dataset",
         "create_class", "insert_image", "insert_annotations", "list_annotations",
+        "get_dataset", "get_image_by_sha",
     ]  # fmt: skip
     for n in names:
         fn = getattr(repo, n)
@@ -291,3 +292,21 @@ def test_no_new_routes() -> None:
     paths = {getattr(r, "path", "") for r in create_app(Settings(postgres_password="x")).routes}
     assert {"/health", "/health/ready"} <= paths
     assert not any(p.startswith(("/projects", "/datasets", "/images")) for p in paths)
+
+
+# F1-05: get_dataset e get_image_by_sha
+def test_get_dataset_found_and_missing() -> None:
+    c = FakeConn()
+    c.rows = [{"id": 2, "project_id": 3, "name": "d", "created_at": NOW}]
+    assert run(repo.get_dataset(c, 2)).project_id == 3
+    assert c.calls[0] == (repo.SELECT_DATASET_SQL, (2,))
+    with pytest.raises(NotFoundError):
+        run(repo.get_dataset(c, 2))
+
+
+def test_get_image_by_sha_found_and_none() -> None:
+    c = FakeConn()
+    c.rows = [_img_row()]
+    assert run(repo.get_image_by_sha(c, 2, SHA)).sha256 == SHA
+    assert c.calls[0] == (repo.SELECT_IMAGE_BY_SHA_SQL, (2, SHA))
+    assert run(repo.get_image_by_sha(c, 2, SHA)) is None
