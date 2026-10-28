@@ -13,7 +13,7 @@ Revisado contra `docs/spec.md` em 28/10/2026. A partir desta revisão, as fases 
 **Fatos informados pelo humano (28/10/2026)**
 - Os modelos de analítico do iNVR são ONNX treinados no Google Colab. O framework de treino, os pesos iniciais e o dataset usados nesses notebooks ainda não estão comprovados; a origem e a licença dependem dos notebooks e dos registros do Colab (ver F1-02 e F5-12 a F5-14). Isso não permite concluir se os modelos são ou não derivados da Ultralytics.
 
-**Próxima tarefa executável: F0-04.**
+**Próxima tarefa executável: F0-05.**
 
 ## Fase 0: Fundação técnica (pré-requisito da Fase 1 do plano)
 - [x] F0-01 Estrutura do repositório (backend/, frontend/, docs/, docker/), `pyproject.toml`, ruff, mypy, pytest
@@ -124,7 +124,7 @@ Revisado contra `docs/spec.md` em 28/10/2026. A partir desta revisão, as fases 
     - **Custo/tempo:** matriz dobra o tempo; o cache de pip/npm e `cancel-in-progress` mitigam. Execução de `make check` instala `node_modules` via `frontend-deps` apenas se faltar, então `npm ci` antes é necessário para ser determinístico.
     - **Segurança de PRs de forks:** sem segredos e com `contents: read`, PRs externos são seguros; não adicionar `pull_request_target` nem passos que executem código do PR com token escrevível.
   - **Fora de escopo:** CD/publicação de imagens, registry, release, Dependabot, verificação automática de licenças (F0-04), cobertura de testes, badges avançados, proteção de branch (configuração do repositório, ação do humano).
-- [~] F0-04 Verificação automática de licenças no `make check` (PRÓXIMA TAREFA EXECUTÁVEL; planejada em 28/10/2026)
+- [x] F0-04 Verificação automática de licenças no `make check` (concluída em 28/10/2026)
   - **Dependências:** F0-01, F0-02, F0-03 (concluídas). **Tamanho:** M (cerca de 2 dias). Dividida em três subtarefas de até ~1 dia, cada uma com commits pequenos e `make check` verde ao final:
     - **F0-04a** Núcleo puro: normalização de licenças, política, exceções, detecção de Ultralytics e função `verify` sobre dados injetáveis, com todos os testes negativos (critérios 1 a 8). Não toca em ambiente real, Makefile nem docs de registro.
     - **F0-04b** Coletores (Python via `importlib.metadata`, npm via `package-lock.json`, imagens/FROM/actions) e registros (`docs/licencas-transitivas.md`, `docs/licencas-excecoes.toml`), com o gerador do registro de transitivas (critérios 9 a 16).
