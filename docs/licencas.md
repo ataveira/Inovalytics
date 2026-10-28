@@ -21,6 +21,7 @@ A automação da verificação fica para a F0-04. Nenhuma dependência da Ultral
 | httpx | 0.28.1 | BSD-3-Clause | https://github.com/encode/httpx |
 | pyyaml | 6.0.3 | MIT | https://github.com/yaml/pyyaml |
 | types-PyYAML | 6.0.12.20260906 | Apache-2.0 | https://github.com/python/typeshed |
+| packaging | 26.3 | Apache-2.0 OR BSD-2-Clause | https://github.com/pypa/packaging |
 
 ## Imagens de contêiner
 

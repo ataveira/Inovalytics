@@ -683,7 +683,7 @@ def verify(
 
         res = resolve(c, policy)
         if res.generic:
-            notes.append(f"{c.ecosystem}/{g} {c.name} {c.version}: licença {GENERIC_MARK}.")
+            notes.append(f"{c.ecosystem}/{g} {c.name} {c.version}: licença ({GENERIC_MARK}).")
         fail_code = ""
         fail_msg = ""
         if not c.installed:

@@ -1,0 +1,15 @@
+# Exceções à política de licenças (ADR-004). Cada [[excecao]] vale só para o pacote, as versões e
+# o grupo listados. Exceção nunca cobre licença proibida (AGPL/GPL/LGPL/SSPL...) nem a Ultralytics.
+
+[[excecao]]
+ecossistema = "python"
+pacote = "certifi"
+versoes = ">=2026.1"
+grupo = "dev"
+licenca_declarada = "MPL-2.0"
+licenca_verificada = "MPL-2.0"
+evidencia = "https://github.com/certifi/python-certifi/blob/master/LICENSE"
+justificativa = "Copyleft fraco por arquivo, sem modificação; só em dev (via httpx), fora da imagem da API."
+aprovador = "humano"
+data = "2026-10-28"
+adr = "ADR-002"
