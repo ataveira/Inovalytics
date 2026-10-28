@@ -203,4 +203,5 @@ def test_real_tree_is_clean_offline(
     assert code == 0, out
     assert "npm: runtime 0, dev 203" in out
     assert "imagens: runtime 3, dev 0" in out and "actions: runtime 0, dev 3" in out
-    assert "Exceções usadas: 1" in out and "certifi" in out
+    assert "Exceções usadas: 2" in out and "certifi" in out and "pathspec" in out
+    assert "Exceções sem uso" not in out

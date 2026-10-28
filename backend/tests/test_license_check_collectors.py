@@ -398,15 +398,22 @@ def digest(p: Path) -> str:
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
 
-def test_committed_files_exist_and_exception_is_only_certifi(repo_root: Path) -> None:
+def test_committed_files_exist_and_exceptions_are_exactly_certifi_and_pathspec(
+    repo_root: Path,
+) -> None:
     import tomllib
 
     data = tomllib.loads((repo_root / "docs" / "licencas-excecoes.toml").read_text("utf-8"))
-    assert len(data["excecao"]) == 1
-    e = data["excecao"][0]
-    assert (e["pacote"], e["grupo"], e["licenca_verificada"], e["adr"], e["data"]) == (
-        "certifi", "dev", "MPL-2.0", "ADR-002", "2026-10-28",
-    )  # fmt: skip
+    got = {
+        e["pacote"]: (e["versoes"], e["grupo"], e["licenca_verificada"], e["adr"], e["data"])
+        for e in data["excecao"]
+    }
+    assert len(data["excecao"]) == 2
+    assert got == {
+        "certifi": (">=2026.1", "dev", "MPL-2.0", "ADR-002", "2026-10-28"),
+        "pathspec": ("==1.1.1", "dev", "MPL-2.0", "ADR-004", "2026-10-28"),
+    }
+    assert {e["aprovador"] for e in data["excecao"]} == {"humano"}
     assert lp.verify(
         lp.Snapshot([]), lp.DEFAULT_POLICY, {}, data["excecao"], today=date(2026, 10, 28)
     ).ok
@@ -439,6 +446,33 @@ def test_certifi_in_runtime_would_fail() -> None:
     }  # fmt: skip
     rep = lp.verify(lp.Snapshot([c]), lp.DEFAULT_POLICY, {}, [e], today=date(2026, 10, 28))
     assert [v.code for v in rep.violations] == [lp.PROIBIDA]
+
+
+def test_pathspec_exception_is_pinned_to_dev_and_version(repo_root: Path) -> None:
+    import tomllib
+
+    exceptions = tomllib.loads((repo_root / "docs" / "licencas-excecoes.toml").read_text("utf-8"))[
+        "excecao"
+    ]
+
+    def check(group: str, version: str) -> list[str]:
+        c = lp.Component(
+            "python",
+            "pathspec",
+            version,
+            group,
+            classifiers=("License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",),
+            needs_registry=False,
+        )
+        rep = lp.verify(
+            lp.Snapshot([c]), lp.DEFAULT_POLICY, {}, exceptions, today=date(2026, 10, 28)
+        )
+        return [v.code for v in rep.violations]
+
+    assert check("dev", "1.1.1") == []
+    assert check("runtime", "1.1.1") == [lp.PROIBIDA]
+    assert check("dev", "1.1.2") == [lp.PROIBIDA]
+    assert check("dev", "1.1.0") == [lp.PROIBIDA]
 
 
 def build_repo(root: Path, site: Path) -> None:

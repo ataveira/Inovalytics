@@ -65,6 +65,12 @@ está só no extra `dev`, certifi NÃO entra no runtime/imagem da API, apenas no
 desenvolvimento e testes. Exceção APROVADA pelo humano em 2026-10-28 (ADR-002), registrada em
 `docs/licencas-excecoes.toml`. Nenhuma GPL/AGPL/SSPL.
 
+Exceção de copyleft fraco: pathspec 1.1.1 (MPL-2.0, nível de arquivo). Verificado com
+`pip show pathspec`: `Required-by: mypy`; o METADATA traz o classifier `License :: OSI Approved ::
+Mozilla Public License 2.0 (MPL 2.0)`. Dependência transitiva só do grupo `dev`, sem modificação,
+sem redistribuição e fora da imagem da API. Exceção APROVADA pelo humano em 2026-10-28 (ADR-004),
+restrita a pacote, versão `==1.1.1` e grupo `dev` em `docs/licencas-excecoes.toml`.
+
 Observação: a licença do próprio Inovalytics é uma decisão pendente (ver `docs/spec.md`).
 
 ## GitHub Actions

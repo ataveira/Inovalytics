@@ -95,7 +95,13 @@
   `docs/licencas.md` (limite: não há metadado legível offline; a verificação é humana).
 - Exceções em `docs/licencas-excecoes.toml`: presas a pacote, versões, grupo e licença declarada, com
   evidência, justificativa, aprovador, data e ADR; exceção inválida falha o gate mesmo sem uso.
-  Única hoje: certifi (MPL-2.0, `dev`, ADR-002). Nunca cobre licença proibida nem Ultralytics.
+  Hoje são duas: certifi (MPL-2.0, `dev`, ADR-002) e pathspec 1.1.1 (MPL-2.0, `dev`, ADR-004).
+  Nunca cobre licença proibida nem Ultralytics.
+- Decisão do humano (2026-10-28): exceção de licença para pathspec 1.1.1 (MPL-2.0, copyleft fraco em
+  nível de arquivo), dependência transitiva de dev exigida pelo mypy (`Required-by: mypy`). Mesmas
+  condições do certifi: só no grupo `dev`, sem modificação, sem redistribuição e fora da imagem da
+  API. Presa a pacote, versão `==1.1.1` e grupo `dev`; outra versão ou o grupo `runtime` volta a
+  falhar. Nenhuma outra licença foi aprovada.
 - Registro de transitivas Python: `docs/licencas-transitivas.md`, gerado por `make licencas-sync`
   (união, nunca apaga; `--prune` explícito). Sem versão, de propósito. Rodar nos Python 3.11 e 3.12
   e commitar, pois marcadores de ambiente mudam a árvore. A verificação nunca escreve.
