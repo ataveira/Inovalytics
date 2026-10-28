@@ -302,6 +302,33 @@ def test_images_unregistered_wrong_tag_and_unused_row(tmp_path: Path) -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    "image",
+    [f"{VENDOR}/{VENDOR}", f"{VENDOR}/{VENDOR}:latest", f"{VENDOR}/{VENDOR}:${{TAG}}"],
+)
+def test_images_vendor_detected_even_when_unpinned_or_unresolved(
+    tmp_path: Path, image: str
+) -> None:
+    write_images(tmp_path, "services: {}\n", f"FROM {image}\n")
+    col = lc.collect_images(tmp_path, [])
+    assert (lp.ULTRALYTICS, image) in {(v.code, v.package) for v in col.issues}
+
+
+def test_images_vendor_detected_from_compose_without_tag(tmp_path: Path) -> None:
+    write_images(tmp_path, f"services:\n  x:\n    image: ghcr.io/{VENDOR}/x\n", "FROM scratch\n")
+    col = lc.collect_images(tmp_path, [])
+    assert lp.ULTRALYTICS in {v.code for v in col.issues}
+
+
+@pytest.mark.parametrize(
+    "ref", [f"{VENDOR}/action@v1", f"{VENDOR}/action", f"docker://{VENDOR}/x:1", f"{VENDOR}@v1"]
+)
+def test_actions_vendor_detected_even_when_unverifiable(tmp_path: Path, ref: str) -> None:
+    write_workflow(tmp_path, [ref])
+    col = lc.collect_actions(tmp_path, [])
+    assert (lp.ULTRALYTICS, ref) in {(v.code, v.package) for v in col.issues}
+
+
 def write_workflow(root: Path, uses: list[str]) -> None:
     wf = root / ".github" / "workflows"
     wf.mkdir(parents=True, exist_ok=True)

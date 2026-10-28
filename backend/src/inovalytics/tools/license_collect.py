@@ -366,6 +366,13 @@ def collect_images(root: Path, rows: Sequence[DocRow]) -> Collected:
         if ref in seen:
             continue
         seen.add(ref)
+        # Antes de qualquer `continue`: referência sem tag, com variável ou não registrada também conta.
+        if _VENDOR in ref.lower():
+            bad(
+                ULTRALYTICS,
+                ref,
+                f"{ref}: ligado à Ultralytics (AGPL-3.0), proibido; exceção não se aplica.",
+            )
         if "${" in ref or "$" in ref:
             bad(DESCONHECIDA, ref, f"{ref}: referência de imagem não resolvida (variável).")
             continue
@@ -384,12 +391,6 @@ def collect_images(root: Path, rows: Sequence[DocRow]) -> Collected:
                 ref,
                 f"{ref}: sem linha única em 'Imagens de contêiner' de docs/licencas.md.",
             )
-            if _VENDOR in ref.lower():
-                bad(
-                    ULTRALYTICS,
-                    ref,
-                    f"{ref}: ligado à Ultralytics (AGPL-3.0), proibido; exceção não se aplica.",
-                )
             continue
         row = matches[0]
         used_rows.add(row.name)
@@ -448,6 +449,13 @@ def collect_actions(root: Path, rows: Sequence[DocRow]) -> Collected:
         if ref.startswith("./") or ref in seen:
             continue
         seen.add(ref)
+        # Antes de qualquer `continue`: action sem versão, docker:// ou não registrada também conta.
+        if _VENDOR in ref.lower():
+            bad(
+                ULTRALYTICS,
+                ref,
+                f"{ref}: ligado à Ultralytics (AGPL-3.0), proibido; exceção não se aplica.",
+            )
         name, _, version = ref.partition("@")
         segs = name.split("/")
         if ref.startswith("docker://") or len(segs) < 2 or not version:
