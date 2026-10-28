@@ -23,7 +23,7 @@
 ```
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-make check   # ruff, mypy, pytest, eslint, vitest
+make check   # ruff, mypy, pytest, licenças (make licencas), eslint, vitest
 ```
 Copie `.env.example` para `.env` (nunca commitar). Layout e ferramentas: `docs/decisoes.md`.
 

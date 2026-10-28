@@ -70,3 +70,37 @@
   passou em Python 3.11 e 3.12 (cerca de 40 s cada) e o `compose-smoke` manual passou (cerca de 2 min,
   incluindo o pull das imagens). Ainda falta ele ficar verde em 3 execuções seguidas para virar check
   obrigatório, e o erro de lint proposital (critério 17) não foi exercitado.
+
+## ADR-004: Verificação automática de licenças (F0-04)
+
+- Status: proposta, para revisão. As decisões marcadas "humano" foram tomadas em 2026-10-28.
+- Onde: `backend/src/inovalytics/tools/` (`license_policy.py` núcleo puro, `license_collect.py`
+  coletores, `license_registry.py` registros, `license_check.py` CLI), chamado por `make licencas`
+  e pelo `make check` (depois do pytest, antes do eslint). Offline: sem rede, `subprocess`, `npm`
+  ou `pip`. Não é parecer jurídico.
+- Política: permitidas MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC, PSF-2.0, Python-2.0, 0BSD,
+  Unlicense, CC0-1.0, PostgreSQL, Zlib, BlueOak-1.0.0; MPL-2.0 só por exceção; AGPL, GPL, LGPL,
+  SSPL, BUSL, non-commercial, proprietárias e Ultralytics sempre falham, sem exceção. Falha fechada:
+  licença ausente, desconhecida, ilegível ou fora da lista bloqueia.
+- Decisão do humano (2026-10-28): Python-2.0 e BlueOak-1.0.0 entram na lista (permissivas; hoje só
+  em dependências de dev do `package-lock.json`).
+- Decisão do humano (2026-10-28): os classifiers genéricos "BSD License" e "Apache Software License"
+  são aceitos como BSD-3-Clause e Apache-2.0, e a saída marca "normalizado de forma genérica" para
+  auditoria. Nada além disso foi aprovado.
+- Ordem das fontes (Python): `License-Expression` (PEP 639) decide sozinha; senão, o campo `License`
+  (só se curto e de uma linha) somado aos classifiers `License ::`, e todas as licenças reconhecidas
+  devem ser permitidas. npm: campo `license` de cada entrada do lock (`lockfileVersion` 2 ou 3;
+  `resolved` fora do registro npm falha). Expressões SPDX: `OR` basta uma alternativa permitida,
+  `AND` exige todas, `WITH` é desconhecido. Imagens e actions: linha registrada em
+  `docs/licencas.md` (limite: não há metadado legível offline; a verificação é humana).
+- Exceções em `docs/licencas-excecoes.toml`: presas a pacote, versões, grupo e licença declarada, com
+  evidência, justificativa, aprovador, data e ADR; exceção inválida falha o gate mesmo sem uso.
+  Única hoje: certifi (MPL-2.0, `dev`, ADR-002). Nunca cobre licença proibida nem Ultralytics.
+- Registro de transitivas Python: `docs/licencas-transitivas.md`, gerado por `make licencas-sync`
+  (união, nunca apaga; `--prune` explícito). Sem versão, de propósito. Rodar nos Python 3.11 e 3.12
+  e commitar, pois marcadores de ambiente mudam a árvore. A verificação nunca escreve.
+- Limites: metadado que mente não é detectável; nenhuma licença é inferida por nome, página ou
+  arquivo LICENSE; auditoria completa e revisão jurídica ficam para a F6-05.
+- Consequência: `packaging` passa a ser importado (extra `dev`, registrado em `docs/licencas.md`);
+  PyYAML e `packaging` são importados só dentro dos coletores.
+
