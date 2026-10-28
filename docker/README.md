@@ -10,3 +10,5 @@ Teste de ponta a ponta (exige Docker): `make compose-smoke`.
 Atenção: a porta da API é publicada apenas em `127.0.0.1` por padrão (`${API_BIND:-127.0.0.1}:${API_PORT:-8000}:8000`).
 Para torná-la acessível à rede, defina `API_BIND=0.0.0.0` (ou o IP de uma interface específica) no `.env`;
 expor assim exige proteger a API (firewall ou proxy reverso). Use `API_PORT` para mudar a porta.
+
+No CI (`.github/workflows/ci.yml`), o job `compose-smoke` roda `make compose-smoke` (ver ADR-003).
