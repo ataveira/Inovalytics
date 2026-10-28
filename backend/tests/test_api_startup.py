@@ -186,12 +186,45 @@ def test_two_startups_create_at_most_once() -> None:
     assert fake.calls.count("create_bucket") == 1
 
 
-@pytest.mark.parametrize("code", ["BucketAlreadyOwnedByYou", "BucketAlreadyExists"])
-def test_create_race_is_success(code: str) -> None:
-    fake = FakeS3([_client_error(404, "404")], create=_client_error(409, code, "CreateBucket"))
-    with TestClient(_app(fake)):
+def test_create_race_owned_by_you_is_success(caplog: pytest.LogCaptureFixture) -> None:
+    fake = FakeS3(
+        [_client_error(404, "404")], create=_client_error(409, "BucketAlreadyOwnedByYou", "Create")
+    )
+    with caplog.at_level(logging.INFO, logger="inovalytics.api.main"), TestClient(_app(fake)):
         pass
     assert fake.calls == ["head_bucket", "create_bucket"]
+    assert "garantido" in caplog.text
+    assert "(criado)" not in caplog.text
+
+
+def test_create_race_already_exists_accessible_is_success() -> None:
+    fake = FakeS3(
+        [_client_error(404, "404"), None],
+        create=_client_error(409, "BucketAlreadyExists", "Create"),
+    )
+    with TestClient(_app(fake)):
+        pass
+    assert fake.calls == ["head_bucket", "create_bucket", "head_bucket"]
+
+
+@pytest.mark.parametrize("status", [403, 404])
+def test_already_exists_with_other_owner_fails_permanently(status: int) -> None:
+    fake = FakeS3(
+        [_client_error(404, "404"), _client_error(status, "AccessDenied")],
+        create=_client_error(409, "BucketAlreadyExists", "Create"),
+    )
+    sleeps = Sleeps()
+    with pytest.raises(StorageStartupError), TestClient(_app(fake, sleeps)):
+        pass
+    assert fake.calls == ["head_bucket", "create_bucket", "head_bucket"]
+    assert sleeps.values == []
+
+
+def test_created_log_says_criado(caplog: pytest.LogCaptureFixture) -> None:
+    fake = FakeS3([_client_error(404, "404")])
+    with caplog.at_level(logging.INFO, logger="inovalytics.api.main"):
+        asyncio.run(ensure_bucket(CFG, fake, sleep=Sleeps()))
+    assert "bucket meu-bucket verificado (criado)" in caplog.text
 
 
 # --- critério 5 e 6 ---------------------------------------------------------------------
@@ -272,13 +305,20 @@ def test_settings_defaults_and_env() -> None:
 
 
 @pytest.mark.parametrize("name", ["S3_STARTUP_TIMEOUT", "S3_STARTUP_RETRIES"])
-@pytest.mark.parametrize("value", ["0", "-1", "abc", "", "nan"])
+@pytest.mark.parametrize("value", ["0", "-1", "abc", "nan"])
 def test_settings_invalid_values_cite_only_name(name: str, value: str) -> None:
     base = {"POSTGRES_PASSWORD": "p", "S3_ACCESS_KEY": "a", "S3_SECRET_KEY": "s", name: value}
     with pytest.raises(ValueError, match=name) as ei:
         Settings.from_env(base)
-    if value:
-        assert value not in str(ei.value).replace(name, "")
+    assert value not in str(ei.value).replace(name, "")
+
+
+@pytest.mark.parametrize("name", ["S3_STARTUP_TIMEOUT", "S3_STARTUP_RETRIES"])
+def test_settings_empty_value_means_default(name: str) -> None:
+    """`.env` com `S3_STARTUP_X=` vazio (compose repassa vazio) usa o padrão, não falha."""
+    base = {"POSTGRES_PASSWORD": "p", "S3_ACCESS_KEY": "a", "S3_SECRET_KEY": "s", name: ""}
+    s = Settings.from_env(base)
+    assert (s.s3_startup_timeout, s.s3_startup_retries) == (30.0, 5)
 
 
 def test_boto3_client_config_single_attempt(monkeypatch: pytest.MonkeyPatch) -> None:

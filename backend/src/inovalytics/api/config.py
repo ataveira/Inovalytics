@@ -11,9 +11,12 @@ _REQUIRED = ("POSTGRES_PASSWORD", "S3_ACCESS_KEY", "S3_SECRET_KEY")
 
 
 def _positive(e: Mapping[str, str], name: str, default: float, *, integer: bool) -> float:
-    """Lê um número positivo do ambiente; o erro cita só o NOME da variável."""
+    """Lê um número positivo do ambiente; o erro cita só o NOME da variável.
+
+    Ausente ou string vazia (ex.: `S3_STARTUP_TIMEOUT=` no .env) vale como não definida: padrão.
+    """
     raw = e.get(name)
-    if raw is None:
+    if raw is None or raw == "":
         return default
     try:
         value = int(raw) if integer else float(raw)

@@ -128,7 +128,7 @@ def test_unexpected_exception_type_is_permanent_and_wrapped() -> None:
 
 def test_bucket_already_exists_then_startup_succeeds_through_app() -> None:
     fake = FakeS3(
-        [_client_error(404, "404")],
+        [_client_error(404, "404"), None],
         create=_client_error(409, "BucketAlreadyExists", "CreateBucket"),
     )
     sleeps = Sleeps()
@@ -138,7 +138,7 @@ def test_bucket_already_exists_then_startup_succeeds_through_app() -> None:
 
     with TestClient(create_app(CFG, {}, bucket_initializer=init)) as c:
         assert c.get("/health").status_code == 200
-    assert fake.calls == ["head_bucket", "create_bucket"]
+    assert fake.calls == ["head_bucket", "create_bucket", "head_bucket"]
     assert sleeps.values == []
 
 

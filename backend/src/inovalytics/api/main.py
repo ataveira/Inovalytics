@@ -91,20 +91,32 @@ def _is_transient(exc: BaseException) -> bool:
     return isinstance(exc, _TRANSIENT)
 
 
-def _head_or_create(client: Any, bucket: str) -> bool:
-    """Devolve True se o bucket já existia; cria quando ausente (404)."""
+def _head_or_create(client: Any, bucket: str) -> str:
+    """Garante o bucket. Devolve "existed", "created" ou "raced" (outra réplica criou).
+
+    BucketAlreadyOwnedByYou é sucesso (corrida entre réplicas com as mesmas credenciais).
+    BucketAlreadyExists indica nome em uso, talvez por OUTRO dono: repete head_bucket e só
+    aceita se o bucket estiver acessível; 403/404 falha como erro permanente.
+    """
     try:
         client.head_bucket(Bucket=bucket)
-        return True
+        return "existed"
     except ClientError as exc:
         if exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode") != 404:
             raise
     try:
         client.create_bucket(Bucket=bucket)
     except ClientError as exc:
-        if exc.response.get("Error", {}).get("Code") not in _BUCKET_EXISTS:
+        code = exc.response.get("Error", {}).get("Code")
+        if code == "BucketAlreadyOwnedByYou":
+            return "raced"
+        if code != "BucketAlreadyExists":
             raise
-    return False
+        # Dono diferente (ou corrida ainda não visível): confirma o acesso. Se o head falhar com
+        # 403/404, a exceção propaga e é tratada como permanente; 5xx segue o retry normal.
+        client.head_bucket(Bucket=bucket)
+        return "raced"
+    return "created"
 
 
 async def ensure_bucket(
@@ -118,6 +130,9 @@ async def ensure_bucket(
 
     Erro transitório repete até `s3_startup_retries` tentativas ou `s3_startup_timeout`;
     erro permanente (credenciais, permissão) falha na 1ª tentativa. Falha => StorageStartupError.
+
+    Após timeout, a thread do boto3 (asyncio.to_thread) não é cancelável e termina sozinha em
+    segundo plano, limitada por connect/read_timeout. É inofensiva: head/create são idempotentes.
     """
     bucket = settings.s3_bucket
     c = client if client is not None else make_s3_client(settings)
@@ -128,7 +143,7 @@ async def ensure_bucket(
         try:
             if remaining <= 0:
                 raise TimeoutError
-            existed = await asyncio.wait_for(
+            outcome = await asyncio.wait_for(
                 asyncio.to_thread(_head_or_create, c, bucket), timeout=remaining
             )
         except Exception as exc:
@@ -148,7 +163,12 @@ async def ensure_bucket(
                 ) from None
             await sleep(min(backoff_delay(attempt), max(deadline - clock(), 0.0)))
         else:
-            logger.info("bucket %s verificado%s", bucket, "" if existed else " (criado)")
+            suffix = {
+                "existed": "",
+                "created": " (criado)",
+                "raced": " (garantido; já criado por outra réplica ou processo)",
+            }[outcome]
+            logger.info("bucket %s verificado%s", bucket, suffix)
             return
 
 

@@ -45,7 +45,8 @@ def test_no_literal_secrets_and_vars_in_env_example(
     compose: dict[str, Any], repo_root: Path
 ) -> None:
     example = (repo_root / ".env.example").read_text(encoding="utf-8")
-    example_vars = set(re.findall(r"^([A-Z][A-Z0-9_]*)=", example, re.M))
+    # Variáveis opcionais podem estar documentadas comentadas (`# NOME=padrão`).
+    example_vars = set(re.findall(r"^(?:# )?([A-Z][A-Z0-9_]*)=", example, re.M))
     raw = (repo_root / "docker-compose.yml").read_text(encoding="utf-8")
     used = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)", raw))
     assert used and used <= example_vars, used - example_vars

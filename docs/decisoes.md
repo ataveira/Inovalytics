@@ -51,8 +51,15 @@
 - Retry: `S3_STARTUP_TIMEOUT` (prazo total, padrão 30 s) e `S3_STARTUP_RETRIES` (tentativas,
   padrão 5), ambos positivos. Backoff 0,5 s dobrando até 5 s, limitado pelo prazo restante. Só erros
   transitórios (conexão, timeout, HTTP 5xx) repetem; credenciais ou permissão erradas falham na 1ª
-  tentativa. `BucketAlreadyOwnedByYou`/`BucketAlreadyExists` contam como sucesso (corrida entre
-  réplicas). O boto3 segue com `max_attempts=1`; o retry é laço próprio, sem biblioteca nova.
+  tentativa. `BucketAlreadyOwnedByYou` conta como sucesso (corrida entre réplicas). Com
+  `BucketAlreadyExists` o nome pode pertencer a outro dono: o startup repete `head_bucket` e só
+  aceita se o bucket estiver acessível; 403/404 falha como erro permanente. O boto3 segue com
+  `max_attempts=1`; o retry é laço próprio, sem biblioteca nova.
+- Timeout: `asyncio.wait_for` não cancela a thread do boto3 (`to_thread`); ela termina sozinha,
+  limitada por `connect_timeout`/`read_timeout`. É inofensiva, pois `head_bucket` e `create_bucket`
+  são idempotentes.
+- Variáveis `S3_STARTUP_*` vazias (ex.: linha `S3_STARTUP_TIMEOUT=` no `.env`) valem como não
+  definidas e usam o padrão; `.env.example` as traz comentadas.
 - Segredos: log e exceção citam só bucket, tipo da exceção e nº da tentativa.
 - Testes: `create_app(..., bucket_initializer=...)`; com `checks` injetados e sem initializer o
   startup é no-op. Não há variável de produção para pular o startup. Os testes usam a fixture
