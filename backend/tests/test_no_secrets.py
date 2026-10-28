@@ -20,11 +20,10 @@ def test_no_real_credentials_in_files(repo_root: Path) -> None:
         if p == Path(__file__).resolve() or p.suffix in BINARY or p.name == "package-lock.json":
             continue
         text = p.read_text(encoding="utf-8", errors="ignore")
-        if PRIVATE_KEY_RE.search(text):
+        if PRIVATE_KEY_RE.search(text) or any(
+            m.group(1).lower() not in PLACEHOLDERS for m in SECRET_RE.finditer(text)
+        ):
             offenders.append(p)
-        for m in SECRET_RE.finditer(text):
-            if m.group(1).lower() not in PLACEHOLDERS:
-                offenders.append(p)
     assert not offenders, offenders
 
 

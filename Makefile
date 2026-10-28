@@ -26,6 +26,8 @@ frontend-deps:
 
 # Ordem: ruff, mypy, pytest, depois eslint e vitest do frontend.
 check:
+	@# Limitação: este grep é só a primeira barreira (apenas .py, apenas imports no início da linha;
+	@# não vê Dockerfile, .toml, .json, imports dinâmicos). Cobertura completa: backend/tests/test_no_ultralytics.py.
 	@! grep -rniE "(^|\s)(from|import)\s+ultralytics" --include=*.py --exclude-dir=.venv --exclude-dir=node_modules --exclude-dir=.git . || (echo "ERRO: uso de ultralytics proibido (AGPL)"; exit 1)
 	$(MAKE) lint-backend
 	$(MAKE) typecheck
