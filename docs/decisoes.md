@@ -14,7 +14,7 @@
 
 ## ADR-002: Armazenamento S3 (SeaweedFS) e driver PostgreSQL (asyncpg) (F0-02)
 
-- Status: aprovada pelo humano.
+- Status: aprovada pelo humano (SeaweedFS e asyncpg, em 2026-10-28), exceto a exceção do certifi, que segue pendente de aprovação.
 - Armazenamento: SeaweedFS (Apache-2.0, gateway S3) como serviço `storage`, imagem com tag fixa.
   A API usa boto3 e as variáveis `S3_ENDPOINT_URL`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`;
   o servidor é intercambiável por configuração.
