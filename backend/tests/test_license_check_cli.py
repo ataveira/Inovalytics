@@ -220,3 +220,10 @@ def test_prune_without_write_is_a_usage_error(
 def test_prune_with_write_is_accepted(fake_repo: tuple[Path, Path], no_network: None) -> None:
     root, site = fake_repo
     assert main(["--root", str(root), "--metadata-path", str(site), "--write", "--prune"]) == 0
+
+
+def test_licencas_target_ignores_extra_args_and_never_writes(repo_root: Path) -> None:
+    out = _make(repo_root, "-n", "licencas", "LICENCAS_ARGS=--write").stdout
+    assert "license_check" in out and "--write" not in out
+    sync = _make(repo_root, "-n", "licencas-sync", "LICENCAS_ARGS=--prune").stdout
+    assert "--write" in sync and "--prune" in sync

@@ -1,5 +1,6 @@
 PYTHON ?= python
 NPM_FRONT = npm --prefix frontend
+# Só para `licencas-sync` (ex.: LICENCAS_ARGS=--prune). O alvo `licencas` não aceita argumentos.
 LICENCAS_ARGS ?=
 
 .PHONY: compose-smoke test lint check lint-backend lint-frontend typecheck test-frontend frontend-deps licencas licencas-sync
@@ -31,7 +32,7 @@ frontend-deps:
 
 # Verificação de licenças (F0-04): offline, nunca escreve. Falha com código 1 se houver violação.
 licencas:
-	$(PYTHON) -m inovalytics.tools.license_check $(LICENCAS_ARGS)
+	$(PYTHON) -m inovalytics.tools.license_check
 
 # Atualiza docs/licencas-transitivas.md por união (nunca apaga; use --prune à mão). Rode também no
 # Python 3.11 e no 3.12 e faça commit, pois os marcadores de ambiente mudam a árvore.

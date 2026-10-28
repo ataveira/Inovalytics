@@ -119,6 +119,12 @@
   - Escopo ampliado da descoberta de imagens (falha fechada): `Dockerfile`, `Dockerfile.*` e
     `*.Dockerfile` sob `docker/` (recursivo) e na raiz; `docker-compose*.yml|yaml` e
     `compose*.yml|yaml` na raiz e sob `docker/`.
+  - Revisão final: chave de registro npm não dobra `-`/`_`/`.` (só Python usa PEP 503) e a tabela de
+    diretas de `docs/licencas.md` vale para os dois ecossistemas; Ultralytics é detectada antes de
+    qualquer `continue` em imagens e actions; "Non Commercial" e "Server Side Public License" em
+    texto livre são PROIBIDA; entrada não-objeto no `package-lock.json` é erro de entrada (código 2);
+    `--prune` sem `--write` é erro de uso; `LICENCAS_ARGS` só vale para `licencas-sync` (o alvo
+    `licencas` nunca escreve).
   - Limite conhecido: lista de licenças em array no npm (`"license": [...]`) vira `OR` (basta uma
     permitida), coerente com o comportamento do npm legado; não há como saber offline se o autor
     quis `AND`.
