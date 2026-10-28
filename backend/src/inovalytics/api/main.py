@@ -24,6 +24,8 @@ from fastapi.responses import JSONResponse
 
 from inovalytics import __version__
 from inovalytics.api.config import Settings
+from inovalytics.api.images import DbProvider, LazyObjectStore, LazyPool, register_upload
+from inovalytics.uploads.store import Boto3ObjectStore, ObjectStore
 
 logger = logging.getLogger(__name__)
 
@@ -176,14 +178,25 @@ def create_app(
     settings: Settings | None = None,
     checks: dict[str, Check] | None = None,
     bucket_initializer: Callable[[], Awaitable[None]] | None = None,
+    db_provider: DbProvider | None = None,
+    object_store: ObjectStore | None = None,
 ) -> FastAPI:
     """Cria a app. `checks` permite injetar verificações (fakes nos testes).
 
     O startup garante o bucket S3 (`ensure_bucket`). Com `checks` injetados e sem
     `bucket_initializer`, o startup não faz chamada de rede (no-op); em produção
     (`checks=None`) usa o initializer real.
+
+    `db_provider` e `object_store` alimentam a rota de upload (F1-05c). O pool do Postgres é
+    preguiçoso: o startup não conecta (ADR-005) e o shutdown só o fecha se foi criado.
     """
     cfg = settings or Settings.from_env()
+    provider: DbProvider = db_provider if db_provider is not None else LazyPool(cfg)
+    store: ObjectStore = (
+        object_store
+        if object_store is not None
+        else LazyObjectStore(lambda: Boto3ObjectStore(make_s3_client(cfg), cfg.s3_bucket))
+    )
     init: Callable[[], Awaitable[None]]
     if bucket_initializer is not None:
         init = bucket_initializer
@@ -200,7 +213,10 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         await init()
-        yield
+        try:
+            yield
+        finally:
+            await provider.close()
 
     app = FastAPI(title="Inovalytics API", version=__version__, lifespan=lifespan)
     active: dict[str, Check] = (
@@ -237,6 +253,7 @@ def create_app(
             content={"status": "ok" if healthy else "unavailable", "checks": results},
         )
 
+    register_upload(app, cfg, provider, store)
     return app
 
 
