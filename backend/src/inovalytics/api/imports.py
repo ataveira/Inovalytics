@@ -1,5 +1,5 @@
-"""Rotas de importação COCO (F1-06c, ADR-008) e de rótulos txt (F1-07d, ADR-009): corpo JSON,
-limite por rota, tudo ou nada.
+"""Rotas de importação COCO (F1-06c, ADR-008), de rótulos txt (F1-07d, ADR-009) e de Pascal VOC
+(F1-08d, ADR-010): corpo JSON, limite por rota, tudo ou nada.
 
 Segundo (e último) módulo da camada `api` que importa `inovalytics.db`; `main.py` só registra a
 rota. Reaproveita o pool preguiçoso, o mapeamento de erros de banco e o formato de corpo de erro da
@@ -42,12 +42,16 @@ from inovalytics.imports.import_core import ImportReport as TxtReport
 from inovalytics.imports.names_yaml import TxtLimits
 from inovalytics.imports.txt_labels_parser import parse_txt_labels
 from inovalytics.imports.txt_labels_service import import_txt_labels
+from inovalytics.imports.voc_parser import VocLimits, parse_voc
+from inovalytics.imports.voc_service import import_voc
 
 log = logging.getLogger(__name__)
 
 _PATH_RE = re.compile(r"^/datasets/[^/]+/imports/coco/?$")
 TXT_ROUTE = "/datasets/{dataset_id}/imports/yolo-txt"  # único lugar com o nome do formato
 _TXT_PATH_RE = re.compile("^" + TXT_ROUTE.replace("{dataset_id}", "[^/]+") + "/?$")
+VOC_ROUTE = "/datasets/{dataset_id}/imports/pascal-voc"
+_VOC_PATH_RE = re.compile("^" + VOC_ROUTE.replace("{dataset_id}", "[^/]+") + "/?$")
 _TRUE = frozenset({"true", "1"})
 _FALSE = frozenset({"false", "0"})
 MAX_MESSAGE_CHARS = 300  # defesa em profundidade: nenhuma mensagem de item passa disso
@@ -391,3 +395,63 @@ def register_import_txt(app: FastAPI, settings: Settings, provider: DbProvider) 
             return result
         status = 201 if result.status == "importado" else 200
         return JSONResponse(status_code=status, content=_txt_report_json(result))
+
+
+def voc_limits_from_settings(s: Settings) -> VocLimits:
+    return VocLimits(
+        max_json_bytes=s.import_max_json_bytes,
+        max_images=s.import_max_images,
+        max_annotations=s.import_max_annotations,
+        max_categories=s.import_max_categories,
+        max_errors=s.import_max_errors,
+        max_xml_bytes=s.import_max_xml_bytes,
+    )
+
+
+def _voc_report_json(r: TxtReport) -> dict[str, Any]:
+    out = _txt_report_json(r)
+    out["ignorados"] = {
+        "difficult": r.ignored_difficult,
+        "truncated": r.ignored_truncated,
+        "occluded": r.ignored_occluded,
+        "pose": r.ignored_pose,
+        "partes": r.ignored_parts,
+    }
+    out["sem_size"] = r.without_size
+    out["ajustes_origem_zero"] = r.origin_zero_adjustments
+    return out
+
+
+def register_import_voc(app: FastAPI, settings: Settings, provider: DbProvider) -> None:
+    """Acrescenta a rota Pascal VOC (ADR-010) e uma terceira instância do limite de corpo."""
+    limits = voc_limits_from_settings(settings)
+    app.add_middleware(RequestBodyLimitMiddleware, limit=limits.max_json_bytes, path=_VOC_PATH_RE)
+
+    @app.post(VOC_ROUTE)
+    async def import_voc_route(dataset_id: str, request: Request) -> JSONResponse:
+        got = await _receive(
+            request, dataset_id, provider, limits.max_json_bytes, "as anotações Pascal VOC"
+        )
+        if isinstance(got, JSONResponse):
+            return got
+        ds, dry_run, create_classes, body = got
+        try:
+            parsed = await asyncio.to_thread(parse_voc, body, limits, collect_errors=True)
+        except ImportRejectedError as exc:
+            return _invalid_response(exc)
+        except Exception as exc:  # o parser promete não vazar; defesa extra
+            log.error("erro inesperado no parser Pascal VOC: %s", type(exc).__name__)
+            return error_response(500, "Erro interno no servidor.", "erro_interno")
+        finally:
+            del body
+
+        async def run(r: ConnCocoRepository) -> TxtReport:
+            return await import_voc(
+                r, ds, parsed, create_classes=create_classes, dry_run=dry_run, limits=limits
+            )
+
+        result = await _with_repo(provider, run)
+        if isinstance(result, JSONResponse):
+            return result
+        status = 201 if result.status == "importado" else 200
+        return JSONResponse(status_code=status, content=_voc_report_json(result))
