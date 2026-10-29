@@ -207,6 +207,17 @@ def _section(
     return v
 
 
+def _storable(v: str) -> bool:
+    """Texto gravável no banco: sem NUL e sem substituto isolado (que não codifica em UTF-8)."""
+    if "\x00" in v:
+        return False
+    try:
+        v.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def _check_name(v: Any) -> bool:
     return isinstance(v, str) and bool(v.strip()) and len(v) <= MAX_NAME_CHARS
 
@@ -267,8 +278,8 @@ def _parse_categories(raw: list[Any], col: ErrorCollector) -> tuple[list[CocoCat
         else:
             ids.add(cid)
         name = it.get("name")
-        if not _check_name(name):
-            msg = "name deve ser texto não vazio de até 1024 caracteres"
+        if not _check_name(name) or not _storable(name):
+            msg = "name deve ser texto não vazio, sem NUL, de até 1024 caracteres"
             col.add("categoria_nome_invalido", K_CATEGORY, ident, i, msg)
             ok = False
         else:

@@ -33,6 +33,9 @@ class CocoImportError(Exception):
         super().__init__(f"importação recusada ({self.total} erro(s)): {first}")
 
 
+_MAX_REPORTED_ID = 2**63 - 1
+
+
 class ErrorCollector:
     """Acumula defeitos guardando no máximo `cap` por tipo (a memória não cresce com o arquivo)."""
 
@@ -43,6 +46,8 @@ class ErrorCollector:
 
     def add(self, code: str, kind: str, id_: int | None, index: int | None, message: str) -> None:
         self.total += 1
+        if id_ is not None and not -_MAX_REPORTED_ID <= id_ <= _MAX_REPORTED_ID:
+            id_ = None  # inteiro gigante do arquivo não é repetido no relatório (amplificação)
         bucket = self._by_kind.setdefault(kind, [])
         if len(bucket) < self._cap:
             bucket.append(ItemError(code, kind, id_, index, message))
