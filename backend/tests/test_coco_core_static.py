@@ -21,7 +21,7 @@ NAMES = [
 
 def test_defaults_and_overrides() -> None:
     s = Settings.from_env(BASE)
-    assert (s.import_max_json_bytes, s.import_max_images) == (32 * 1024 * 1024, 50_000)
+    assert (s.import_max_json_bytes, s.import_max_images) == (16 * 1024 * 1024, 50_000)
     assert (s.import_max_annotations, s.import_max_categories) == (300_000, 1_000)
     assert (s.import_max_depth, s.import_max_errors) == (12, 100)
     env = {**BASE, **{n: str(i + 1) for i, n in enumerate(NAMES)}}

@@ -86,7 +86,7 @@ class Settings:
     upload_read_timeout: float = (
         60.0  # leitura do S3 no PUT de upload (s); ver S3_UPLOAD_READ_TIMEOUT
     )
-    import_max_json_bytes: int = 32 * 1024 * 1024
+    import_max_json_bytes: int = 16 * 1024 * 1024
     import_max_images: int = 50_000
     import_max_annotations: int = 300_000
     import_max_categories: int = 1_000

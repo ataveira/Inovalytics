@@ -292,7 +292,8 @@ Pinagem: major
   As imagens vêm da F1-05 (upload prévio); não há zip nem multipart, o que evita zip bomb, entradas
   com `../`, links simbólicos e arquivo temporário. Zip fica como tarefa futura (F1-06d).
 - Parser próprio, só biblioteca padrão (`imports/coco_parser.py`), sem `pycocotools`: `json.loads`
-  com rejeição de `NaN`/`Infinity` e de chave duplicada, pré-checagem linear de profundidade, limites
+  com rejeição de `NaN`/`Infinity` e de chave duplicada, checagem de profundidade sem pré-scan (ver
+  débitos), limites
   de bytes, imagens, anotações, categorias e erros (`IMPORT_*`). Não é streaming: o limite de bytes
   protege a memória. O parse roda em thread (`asyncio.to_thread`) para não travar o event loop.
 - Mapeamento de classes: por nome exato (após `strip`) com `label_class.name` do projeto; ausentes
@@ -312,14 +313,14 @@ Pinagem: major
   keypoints e URLs são ignorados (URLs jamais são acessadas).
 - Corpo e limites: o `RequestBodyLimitMiddleware` da F1-05 ganhou o parâmetro `path` (limite por
   rota; uma instância por rota, comportamento do upload inalterado). A rota usa `IMPORT_MAX_JSON_BYTES`
-  (32 MiB): 413 por `Content-Length` sem ler o corpo e por contagem em fluxo (chunked ou
+  (16 MiB): 413 por `Content-Length` sem ler o corpo e por contagem em fluxo (chunked ou
   `Content-Length` mentiroso), abortando antes de acumular o corpo inteiro.
 - Códigos: 201 se algo foi criado (anotações ou classes); 200 sem alterações ou em `dry_run`; 404
   `dataset_nao_encontrado` (verificado antes de ler o corpo, em conexão solta em seguida); 413
   `requisicao_grande_demais`; 415 `tipo_nao_suportado` (qualquer `Content-Type` que não seja
   `application/json`, ou `charset` diferente de UTF-8); 422 `importacao_invalida` (JSON, estrutura,
   limites e erros por item, com `erros`, `erros_total`, `erros_truncados`), `dataset_id_invalido` e
-  `query_invalida`; 409 `conflito_integridade` (violação de restrição ou erro de domínio do
+  `query_invalida`; 409 `dataset_alterado` (imagens mudaram durante a importação) e 409 `conflito_integridade` (violação de restrição ou erro de domínio do
   repositório na fase 2, tudo desfeito); 503 `banco_indisponivel`, `banco_timeout_conexao` e
   `importacao_em_andamento` (`LockTimeoutError`: outra importação do projeto segura o bloqueio; o
   cliente pode repetir); 500 `erro_interno`. Corpos e logs só trazem o tipo da exceção: nunca DSN,
@@ -338,7 +339,7 @@ Pinagem: major
   - H-F1-06-1. Entrada: JSON bruto e imagens pela F1-05 (alternativas: zip com imagens e JSON em
     F1-06d, com limites de zip bomb; ou multipart).
   - H-F1-06-2. Casamento por nome base (alternativa: migração 0002 guardando o caminho original).
-  - H-F1-06-3. Limites padrão (32 MiB, 50 000 imagens, 300 000 anotações, 1 000 categorias,
+  - H-F1-06-3. Limites padrão (16 MiB, 50 000 imagens, 300 000 anotações, 1 000 categorias,
     profundidade 12, 100 erros no relatório).
   - H-F1-06-4. Idempotência por multiconjunto sem apagar (alternativas: substituir as anotações das
     imagens do arquivo; coluna `source` em migração 0002).
@@ -348,16 +349,37 @@ Pinagem: major
   - H-F1-06-7. `iscrowd=1`: ignorar e relatar (padrão) ou tratar como erro.
   - H-F1-06-8. Endpoint aberto até a F4-01, como a F1-05 (H-F1-05-5).
 - Débitos e ressalvas conhecidos (revisão F1-06):
-  - CPU do pré-check de profundidade: é uma varredura por regex em bytes com quantificadores
-    possessivos (sem retrocesso), custo linear no tamanho do arquivo (até 32 MiB), executada em
-    thread. Entradas hostis (`\"` repetido, `"` solto, string gigante sem fechar, milhões de `[`)
-    têm teste de regressão com tempo < 1 s. Um arquivo de 32 MiB ainda ocupa uma thread por
-    algumas centenas de ms; vários envios simultâneos competem por CPU até a F4-01 (autenticação)
-    e um limite de concorrência por rota, ambos pendentes.
+  - CPU e memória do parse (corrige a versão anterior deste ADR). O pré-scan de profundidade por
+    regex possessiva sobre bytes foi medido pelo revisor em 8 a 17 s de CPU por requisição com 32 MiB
+    de muitos tokens (`[]` repetido, aspas soltas); como a regex roda em C e segura o GIL, congelava o
+    servidor inteiro, e a afirmação anterior ("algumas centenas de ms", teste < 1 s) estava errada
+    porque os testes usavam entradas pequenas. O pré-scan foi removido. Agora `json.loads` roda
+    direto: o scanner C do CPython levanta `RecursionError` em cerca de 1000 níveis de forma barata
+    (mapeado para `limite_excedido: max_depth`), e a profundidade <= `IMPORT_MAX_DEPTH` é conferida
+    no objeto já parseado por percurso iterativo (pilha explícita, sem recursão; raiz = nível 1).
+    Os erros e mensagens não mudaram.
+  - Custos reais medidos (CPython 3.13, uma thread, `parse_coco` completo). Entradas hostis sem
+    estrutura (`[` x N, `{"a":` x N, aspas soltas, `\"` repetido, string gigante aberta ou fechada):
+    <= 0,06 s a 32 MiB. O custo real está no parse legítimo de muitos tokens pequenos, que
+    materializa objetos Python: 32 MiB de `[],` ou `{},` levam 1,3 a 1,6 s e ~1,2 GiB de RSS; de `1,`
+    2,3 s (o gancho `parse_int` é uma chamada Python por inteiro) e de `1.5,` 1,4 s. Com 16 MiB:
+    0,6 a 1,0 s e ~600 MiB. Por isso o padrão de `IMPORT_MAX_JSON_BYTES` caiu de 32 para 16 MiB
+    (a 32 MiB o pior caso passava de 2 s). Memória do `json.loads`: ~35 a 40 vezes o tamanho do
+    arquivo no pior caso (listas ou objetos vazios), acima das "centenas de MB" estimadas antes; é o
+    teto a considerar ao dimensionar o contêiner e ao subir o limite.
+  - O parse em `asyncio.to_thread` evita bloquear o event loop só enquanto o interpretador
+    alterna entre threads; o scanner C do `json.loads` (e a construção dos objetos) não libera o
+    GIL, então uma requisição grande ainda atrasa as demais por até ~1 s a 16 MiB. Reduzir
+    `IMPORT_MAX_JSON_BYTES` reduz esse atraso de forma linear; o remédio completo (processo separado
+    ou parser em streaming) e o limite de concorrência por rota ficam pendentes, junto com a
+    autenticação (F4-01). Testes de regressão (`test_coco_parser.py`) rodam o parser em thread com
+    `join(timeout)` e exigem < 2 s por caso.
+  - Dado o limite de 300 000 anotações, 16 MiB dão ~56 bytes por anotação: datasets reais maiores
+    precisam subir o limite conscientemente (H-F1-06-3) ou ser divididos em vários arquivos.
   - TOCTOU de imagens: o bloqueio do projeto não impede upload/remoção de imagens (a F1-05 não o
     toma). Sob o bloqueio, a fase 2 relê as imagens do dataset e compara com o plano da fase 1; se
-    divergirem, falha com `importacao_invalida` / `dataset_alterado`, sem gravar nada (o cliente
-    repete). Resta uma janela mínima entre a releitura e o commit, aceita: as anotações têm FK para
+    divergirem, falha com HTTP 409 `dataset_alterado` (conflito de estado, não defeito do arquivo; o
+    item em `erros` mantém o mesmo código), sem gravar nada (o cliente repete). Resta uma janela mínima entre a releitura e o commit, aceita: as anotações têm FK para
     a imagem, então uma remoção nessa janela vira `conflito_integridade` e desfaz tudo.
   - `lock_timeout` local: vale para a espera do advisory lock e também para espera de bloqueio de
     linha na mesma transação; ambos viram 503 `importacao_em_andamento`, mesmo quando a causa é uma
