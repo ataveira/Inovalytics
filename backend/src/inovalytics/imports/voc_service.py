@@ -119,6 +119,15 @@ def _plan(
     return planned
 
 
+def _analyse(
+    parsed: ParsedVoc, stored: Sequence[ImportImage], col: ErrorCollector, warn: ErrorCollector
+) -> list[Planned]:
+    """Fase 1 inteira que usa CPU: casamento, conferência de `<size>` e planejamento."""
+    matched = _match(parsed, stored, col)
+    bad_size = _check_sizes(parsed, matched, col)
+    return _plan(parsed, matched, bad_size, col, warn)
+
+
 def _report(
     status: str,
     dataset_id: int,
@@ -178,10 +187,9 @@ async def import_voc(
     col = ErrorCollector(lim.max_errors)
     warn = ErrorCollector(lim.max_errors)
     col.absorb(parsed.errors, parsed.errors_total)
-    matched = _match(parsed, stored, col)
-    bad_size = _check_sizes(parsed, matched, col)
-    # CPU-bound (até 300 000 caixas, ~1 s): fora do laço; só esta thread toca nos coletores agora.
-    planned = await asyncio.to_thread(_plan, parsed, matched, bad_size, col, warn)
+    # CPU-bound (casamento de até 50 000 arquivos e planejamento de até 300 000 caixas): fora do
+    # laço de eventos; só esta thread toca nos coletores enquanto roda.
+    planned = await asyncio.to_thread(_analyse, parsed, stored, col, warn)
     if not create_classes:
         missing_classes(decls, classes, col)
     col.raise_if_any(ImportRejectedError)

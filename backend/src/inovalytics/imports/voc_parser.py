@@ -20,10 +20,10 @@ from __future__ import annotations
 
 import json
 import math
-import unicodedata
 from dataclasses import dataclass
 from typing import Any, NamedTuple
 
+from inovalytics.imports.chartables import CONTROL_CHARS
 from inovalytics.imports.common import (
     bad_constant,
     check_class_name,
@@ -57,7 +57,6 @@ MAX_SIZE_DIGITS = 9
 TOL = 1e-6
 SUFFIX = ".xml"
 _NUMBER_CHARS = frozenset("0123456789+-.eE")
-_CONTROL = frozenset({"Cc", "Cs", "Zl", "Zp"})
 _OBJECT_MARK = "<object"
 
 
@@ -180,7 +179,7 @@ def _key_problem(key: str) -> tuple[str, str] | None:
     """(código, mensagem) se a chave do arquivo é inaceitável; o tamanho vem antes de tudo."""
     if not key or len(key) > MAX_KEY_CHARS:
         return "rotulo_nome_invalido", "nome do arquivo XML vazio ou maior que 1024"
-    if not key.isprintable() and any(unicodedata.category(c) in _CONTROL for c in key):
+    if not key.isprintable() and not CONTROL_CHARS.isdisjoint(key):  # tabela em C
         return "rotulo_nome_invalido", "nome do arquivo XML com caractere de controle"
     if not key.endswith(SUFFIX):
         return "rotulo_extensao_invalida", "o arquivo de anotação deve terminar em '.xml'"

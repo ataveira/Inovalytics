@@ -7,8 +7,14 @@ duplicada e constantes não finitas, percurso iterativo de profundidade e valida
 from __future__ import annotations
 
 import math
-import unicodedata
 from typing import Any
+
+from inovalytics.imports.chartables import (
+    BAD_NAME_CHARS,
+    FORMAT_CHARS,
+    SPACE_CHARS,
+    visible,
+)
 
 BORDER_EPS = 1e-9
 MAX_NAME_CHARS = 1024
@@ -75,39 +81,19 @@ def storable(v: str) -> bool:
 
 # Letras/símbolos sem glifo visível (preenchimentos): contam como "vazio" num nome.
 _BLANK_FILLERS = frozenset("\u115f\u1160\u2800\u3164\uffa0")
-# Categorias recusadas em nomes: controle, substituto, separadores de linha/parágrafo e formato
-# (Cf: bidi, largura zero, BOM).
-_BAD_NAME_CATEGORIES = frozenset({"Cc", "Cs", "Zl", "Zp", "Cf"})
 
 # ZWNJ/ZWJ são legítimos entre caracteres visíveis (emoji compostos, persa, escritas indianas).
 _JOINERS = frozenset("\u200c\u200d")
 
-
-def _build_tables() -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
-    """Tabelas por caractere, calculadas uma vez com o `unicodedata` do próprio processo.
-
-    Servem de pré-filtro em C (`set.isdisjoint`, `set <=`): o laço Python por caractere deixa de
-    existir no caminho comum. A semântica é a da definição original, caractere a caractere.
-    """
-    category = unicodedata.category
-    bad: list[str] = []  # categoria recusada, exceto ZWJ/ZWNJ (tratados à parte)
-    invisible: list[str] = []  # não conta como "visível" ao lado de um ZWJ/ZWNJ
-    blank: list[str] = []  # conta como "vazio" num nome
-    for cp in range(0x110000):
-        c = chr(cp)
-        cat = category(c)
-        is_bad = cat in _BAD_NAME_CATEGORIES
-        space = c.isspace()
-        if is_bad and c not in _JOINERS:
-            bad.append(c)
-        if space or c in _BLANK_FILLERS or c in _JOINERS or is_bad:
-            invisible.append(c)
-        if space or c in _BLANK_FILLERS or cat == "Cf":
-            blank.append(c)
-    return frozenset(bad), frozenset(invisible), frozenset(blank)
-
-
-_BAD_CHARS, _INVISIBLE, _BLANK_CHARS = _build_tables()
+# Tabelas por caractere (ver `chartables`: calculadas uma vez com o `unicodedata` do processo).
+# Servem de pré-filtro em C (`set.isdisjoint`, `set <=`): o laço Python por caractere não existe no
+# caminho comum. A semântica é a da definição original, caractere a caractere.
+# Categoria recusada (Cc, Cs, Zl, Zp, Cf), exceto ZWJ/ZWNJ (tratados à parte).
+_BAD_CHARS = BAD_NAME_CHARS - _JOINERS
+# Não conta como "visível" ao lado de um ZWJ/ZWNJ.
+_INVISIBLE = SPACE_CHARS | _BLANK_FILLERS | _JOINERS | BAD_NAME_CHARS
+# Conta como "vazio" num nome.
+_BLANK_CHARS = SPACE_CHARS | _BLANK_FILLERS | FORMAT_CHARS
 
 
 def _joiners_misplaced(v: str) -> bool:
@@ -163,16 +149,12 @@ def check_class_name(v: Any) -> bool:
 def shown(name: str) -> str:
     """Nome do usuário para mensagens: sem controles/separadores e até 200 caracteres.
 
-    Para assim que junta 200 caracteres limpos; nunca olha além de 4096 caracteres de entrada.
+    Nunca olha além de 4096 caracteres de entrada; sem laço Python por caractere (`visible`).
     """
-    out: list[str] = []
-    for c in name[:_SHOWN_SCAN_CHARS]:
-        cat = unicodedata.category(c)
-        if cat[0] != "C" and cat != "Zl" and cat != "Zp":
-            out.append(c)
-            if len(out) >= SHOWN_NAME_CHARS:
-                break
-    return "".join(out)
+    head = name[:SHOWN_NAME_CHARS]
+    if head.isprintable():  # nenhum caractere a remover entre os 200 primeiros
+        return head
+    return visible(name[:_SHOWN_SCAN_CHARS])[:SHOWN_NAME_CHARS]
 
 
 def to_normalized(

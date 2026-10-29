@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import json
 import math
-import unicodedata
 from dataclasses import dataclass
 from typing import Any, NamedTuple
 
+from inovalytics.imports.chartables import CONTROL_CHARS
 from inovalytics.imports.common import (
     bad_constant,
     depth_exceeded,
@@ -49,7 +49,6 @@ TOL = 1e-6
 HI = 1.000001  # 1 + TOL como literal: a fronteira é exatamente o que o usuário escreve
 LO = -1e-6
 _NUMBER_CHARS = frozenset("0123456789+-.eE")
-_CONTROL = frozenset({"Cc", "Cs", "Zl", "Zp"})
 
 
 class TxtBox(NamedTuple):
@@ -156,7 +155,7 @@ def _key_problem(key: str) -> tuple[str, str] | None:
     """(código, mensagem) se a chave de arquivo é inaceitável; o tamanho vem antes de tudo."""
     if not key or len(key) > MAX_KEY_CHARS:
         return "rotulo_nome_invalido", "nome do arquivo de rótulo vazio ou maior que 1024"
-    if not key.isprintable() and any(unicodedata.category(c) in _CONTROL for c in key):
+    if not key.isprintable() and not CONTROL_CHARS.isdisjoint(key):  # tabela em C
         return "rotulo_nome_invalido", "nome do arquivo de rótulo com caractere de controle"
     if not key.endswith(".txt"):
         return "rotulo_extensao_invalida", "o arquivo de rótulo deve terminar em '.txt'"
