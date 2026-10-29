@@ -23,7 +23,7 @@ from test_voc_parser import ann, obj
 
 URL = "/datasets/1/imports/pascal-voc"
 JSON_H = {"Content-Type": "application/json"}
-SECRET_TEXT = "CONTEUDO-SECRETO-DO-ARQUIVO-8f3a1c"
+LEAK_MARK = "CONTEUDO-UNICO-DO-ARQUIVO-8f3a1c"
 
 
 class TripwireServer:
@@ -68,7 +68,7 @@ def tripwire() -> Iterator[TripwireServer]:
 @pytest.fixture
 def sentinel(tmp_path: Path) -> Path:
     p = tmp_path / "segredo-fora-do-alcance.txt"
-    p.write_text(SECRET_TEXT, encoding="utf-8")
+    p.write_text(LEAK_MARK, encoding="utf-8")
     return p
 
 
@@ -126,7 +126,7 @@ def test_xxe_end_to_end_is_refused_without_reading_files_or_touching_the_network
     assert tripwire.hits == 0
     assert not [p for p in opened if sentinel.name in p]
     blob = r.text + caplog.text
-    assert SECRET_TEXT not in blob and sentinel.name not in blob
+    assert LEAK_MARK not in blob and sentinel.name not in blob
     assert str(tripwire.port) not in blob and "127.0.0.1" not in blob
     for err in j["erros"]:
         assert len(err["message"]) <= 200
@@ -146,7 +146,7 @@ def test_xxe_alone_in_a_batch_leaves_everything_untouched(
     assert r.status_code == 422
     assert [e["code"] for e in r.json()["erros"]] == ["doctype_proibido"]
     assert env.repo.classes == [] and env.repo.annotations == [] and tripwire.hits == 0
-    assert env.repo.writes() == [] and SECRET_TEXT not in r.text
+    assert env.repo.writes() == [] and LEAK_MARK not in r.text
 
 
 def test_tripwire_really_detects_a_connection(tripwire: TripwireServer) -> None:
