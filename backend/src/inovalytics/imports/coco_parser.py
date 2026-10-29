@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import math
-import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -27,11 +26,6 @@ MAX_COORD = 1e9
 MAX_INT_DIGITS = 4300
 BORDER_EPS = 1e-9
 
-# Varredura sobre bytes (UTF-8 nunca reutiliza bytes ASCII em sequências multibyte). Quantificadores
-# possessivos (Python 3.11+) eliminam o retrocesso: custo linear mesmo com `\"` repetido, `"` solto
-# ou string sem fechar (o fecho `"?` é opcional, então a string aberta consome até o fim).
-_STRUCT_RE = re.compile(rb'"[^"\\]*+(?:\\.[^"\\]*+)*+"?|[\[\]{}]', re.DOTALL)
-
 K_FILE = "arquivo"
 K_IMAGE = "imagem"
 K_CATEGORY = "categoria"
@@ -40,7 +34,7 @@ K_ANNOTATION = "anotacao"
 
 @dataclass(frozen=True)
 class CocoLimits:
-    max_json_bytes: int = 32 * 1024 * 1024
+    max_json_bytes: int = 16 * 1024 * 1024
     max_images: int = 50_000
     max_annotations: int = 300_000
     max_categories: int = 1_000
@@ -157,17 +151,22 @@ def _parse_float(s: str) -> float:
     return v
 
 
-def _depth_exceeded(data: bytes, max_depth: int) -> bool:
-    """Varredura linear de aninhamento fora de strings; para ao exceder `max_depth`."""
-    depth = 0
-    for m in _STRUCT_RE.finditer(data):
-        c = m.group()
-        if c in b"[{":
-            depth += 1
-            if depth > max_depth:
-                return True
-        elif c in b"]}":
-            depth -= 1
+def _depth_exceeded(root: Any, max_depth: int) -> bool:
+    """Aninhamento de `root` (já parseado) acima de `max_depth`? Percurso iterativo, sem recursão.
+
+    A raiz é o nível 1. Só contêineres entram na pilha; o custo é linear no número de nós.
+    """
+    stack: list[tuple[Any, int]] = [(root, 1)]
+    while stack:
+        node, depth = stack.pop()
+        if not isinstance(node, (dict, list)):
+            continue
+        if depth > max_depth:
+            return True
+        children = node.values() if isinstance(node, dict) else node
+        for child in children:
+            if isinstance(child, (dict, list)):
+                stack.append((child, depth + 1))
     return False
 
 
@@ -178,8 +177,6 @@ def _load(data: bytes, lim: CocoLimits) -> dict[str, Any]:
         text = data.decode("utf-8-sig")
     except UnicodeDecodeError:
         raise _fail("json_invalido", "o arquivo não é UTF-8 válido") from None
-    if _depth_exceeded(data, lim.max_depth):
-        raise _fail("limite_excedido", "limite excedido: max_depth")
     try:
         obj = json.loads(
             text,
@@ -188,8 +185,13 @@ def _load(data: bytes, lim: CocoLimits) -> dict[str, Any]:
             parse_int=_parse_int,
             parse_float=_parse_float,
         )
-    except (ValueError, RecursionError, MemoryError):
+    except RecursionError:
+        # O scanner C do CPython recusa ~1000 níveis de forma barata: só aninhamento causa isso.
+        raise _fail("limite_excedido", "limite excedido: max_depth") from None
+    except (ValueError, MemoryError):
         raise _fail("json_invalido", "JSON inválido") from None
+    if _depth_exceeded(obj, lim.max_depth):
+        raise _fail("limite_excedido", "limite excedido: max_depth")
     if not isinstance(obj, dict):
         raise _fail("json_invalido", "a raiz do JSON deve ser um objeto")
     return obj

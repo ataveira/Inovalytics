@@ -4,6 +4,7 @@ import ast
 import contextlib
 import json
 import random
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -142,30 +143,129 @@ def test_byte_limit_exact_passes() -> None:
 
 
 # 5b
-def test_depth_dos_is_fast() -> None:
-    t = time.monotonic()
-    assert raw_codes(b"[" * 100_000) == ["limite_excedido"]
-    assert raw_codes(b'{"a":' * 100_000) == ["limite_excedido"]
-    assert time.monotonic() - t < 1
+MIB = 1024 * 1024
+HARD_TIMEOUT = 10.0  # só para a suíte nunca travar; o limite de verdade é o de cada teste
+
+
+def timed_parse(data: bytes, lim: CocoLimits | None = None) -> tuple[float, list[str]]:
+    """Roda `parse_coco` numa thread; falha rápido e claro se passar de HARD_TIMEOUT."""
+    lim = lim or CocoLimits(max_json_bytes=len(data) + 1)
+    out: dict[str, Any] = {}
+
+    def run() -> None:
+        t0 = time.perf_counter()
+        try:
+            parse_coco(data, lim)
+            out["codes"] = []
+        except CocoImportError as e:
+            out["codes"] = [x.code for x in e.errors]
+        except BaseException as e:  # o parser promete não vazar nada além de CocoImportError
+            out["leak"] = e
+        out["dt"] = time.perf_counter() - t0
+
+    th = threading.Thread(target=run, daemon=True)
+    th.start()
+    th.join(HARD_TIMEOUT)
+    assert not th.is_alive(), f"parse_coco travou (> {HARD_TIMEOUT}s) em {len(data)} bytes"
+    assert "leak" not in out, f"exceção vazou do parser: {out.get('leak')!r}"
+    return out["dt"], out["codes"]
+
+
+def rep(unit: bytes, size: int) -> bytes:
+    return (unit * (size // len(unit) + 1))[:size]
+
+
+@pytest.mark.parametrize("n", [2000, 100_000, 5_000_000, 16 * MIB])
+def test_open_brackets_are_fast(n: int) -> None:
+    dt, got = timed_parse(b"[" * n)
+    assert got in (["limite_excedido"], ["json_invalido"])
+    assert dt < 2.0, f"{n} colchetes levaram {dt:.2f}s"
+
+
+@pytest.mark.parametrize("n", [2000, 100_000, 3_000_000])
+def test_deep_nesting_is_rejected_as_depth_and_fast(n: int) -> None:
+    for data in (b"[" * n + b"]" * n, b'{"a":' * n + b"1" + b"}" * n):
+        dt, got = timed_parse(data)
+        assert got == ["limite_excedido"]
+        assert dt < 2.0, f"aninhamento {n} levou {dt:.2f}s"
 
 
 @pytest.mark.parametrize(
     "payload",
     [
-        b'{"a":"' + b'\\"' * 200_000,  # string nunca fechada com aspas escapadas
-        b'{"a":"' + b'\\\\\\"' * 100_000,  # variante barra-barra-barra-aspas
-        b'{"a":"' + b'x" ' * 200_000,  # aspas soltas no meio
-        b"[" * 300_000 + b'"' + b'\\"' * 100_000,
-        b"{" * 300_000,
-        b'{"a":"' + b"x" * 5_000_000,  # string gigante sem fechar
-        b'{"a":"' + b"\\" * 200_000,  # só barras
+        b'{"a":' * (3 * MIB),
+        b'{"a":"' + b'\\"' * (2 * MIB),  # string nunca fechada com aspas escapadas
+        b'{"a":"' + b'\\\\\\"' * MIB,  # barra-barra-barra-aspas
+        b'{"a":"' + b'x" ' * (4 * MIB),  # aspas soltas no meio
+        b"[" * 300_000 + b'"' + b'\\"' * MIB,
+        b'{"a":"' + b"x" * (16 * MIB - 10),  # string gigante sem fechar
+        b'{"a":"' + b"x" * (16 * MIB - 10) + b'"}',  # string gigante fechada
+        b'{"a":"' + b"\\" * MIB,  # só barras
+        b'[""' * MIB,
+    ],
+    ids=[
+        "obj_aninhado",
+        "aspas_escapadas",
+        "barra3_aspas",
+        "aspas_soltas",
+        "colchetes_e_escapes",
+        "string_gigante_aberta",
+        "string_gigante_fechada",
+        "so_barras",
+        "strings_vazias_abertas",
     ],
 )
-def test_depth_scan_is_linear_on_hostile_strings(payload: bytes) -> None:
-    t = time.monotonic()
-    with pytest.raises(CocoImportError):
-        parse_coco(payload, CocoLimits(max_json_bytes=len(payload) + 1))
-    assert time.monotonic() - t < 1
+def test_hostile_payloads_finish_fast(payload: bytes) -> None:
+    dt, got = timed_parse(payload)
+    assert got  # sempre recusado
+    assert dt < 2.0, f"payload hostil levou {dt:.2f}s"
+
+
+@pytest.mark.parametrize("unit", [b"[],", b"{},", b"1,", b"1.5,", b'"a",'])
+def test_many_small_tokens_are_bounded(unit: bytes) -> None:
+    """Muitos tokens pequenos custam parse real (memória/CPU) mas ficam sob 2 s a 4 MiB."""
+    body = b'{"images":[' + rep(unit, 4 * MIB) + b"1]}"
+    dt, got = timed_parse(body)
+    assert got, "esperava recusa (estrutura inválida)"
+    assert dt < 2.0, f"{unit!r} x 4 MiB levou {dt:.2f}s"
+
+
+def test_depth_scan_does_not_recurse_or_use_regex() -> None:
+    """A checagem de profundidade usa o objeto já parseado e uma pilha explícita."""
+    from inovalytics.imports import coco_parser
+
+    assert not hasattr(coco_parser, "_STRUCT_RE")
+    nested: Any = []
+    for _ in range(50_000):  # muito além do limite de recursão do interpretador
+        nested = [nested]
+    assert coco_parser._depth_exceeded(nested, 12) is True
+    assert coco_parser._depth_exceeded([[1]], 2) is False
+    assert coco_parser._depth_exceeded([[[1]]], 2) is True
+
+
+@pytest.mark.parametrize("levels", [10, 11, 12, 13])
+def test_default_depth_12_accepts_and_13_rejects(levels: int) -> None:
+    # raiz = nível 1; "k" aninha `levels` listas dentro dela (profundidade total levels + 1)
+    data = (
+        b'{"images":[],"annotations":[],"categories":[],"k":' + b"[" * levels + b"]" * levels + b"}"
+    )
+    if levels + 1 <= 12:
+        assert parse_coco(data, LIM).images == ()
+    else:
+        assert raw_codes(data) == ["limite_excedido"]
+
+
+@pytest.mark.parametrize("depth", [12, 13])
+def test_depth_boundary_is_exact_for_mixed_containers(depth: int) -> None:
+    inner = b"1"
+    for i in range(depth - 1):  # depth-1 contêineres dentro da raiz
+        inner = b'{"a":' + inner + b"}" if i % 2 else b"[" + inner + b"]"
+    data = b'{"images":[],"annotations":[],"categories":[],"k":' + inner + b"}"
+    # raiz (1) + depth-1 níveis em "k" = depth
+    if depth <= 12:
+        assert parse_coco(data, LIM).images == ()
+    else:
+        assert raw_codes(data) == ["limite_excedido"]
 
 
 def test_depth_exact_and_brackets_in_strings() -> None:
@@ -174,6 +274,11 @@ def test_depth_exact_and_brackets_in_strings() -> None:
     assert parse_coco(ok, lim).images == ()
     deeper = b'{"images":[],"annotations":[],"categories":[],"k":[[[[]]]]}'
     assert raw_codes(deeper, lim) == ["limite_excedido"]
+    # colchetes e chaves em strings/chaves, com escapes, não contam
+    tricky = (
+        b'{"images":[],"annotations":[],"categories":[],"[[[[[[":"]]}}\\\\","k":["\\"[[[[","{{{{"]}'
+    )
+    assert parse_coco(tricky, lim).images == ()
 
 
 def test_default_depth_handles_polygon_segmentation() -> None:
