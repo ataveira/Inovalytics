@@ -116,6 +116,7 @@ INSERT_DATASET_SQL = (
     "INSERT INTO dataset (project_id, name) VALUES ($1, $2) "
     "RETURNING id, project_id, name, created_at"
 )
+SELECT_DATASET_SQL = "SELECT id, project_id, name, created_at FROM dataset WHERE id = $1"
 INSERT_CLASS_SQL = (
     "INSERT INTO label_class (project_id, name, position) VALUES ($1, $2, $3) "
     "RETURNING id, project_id, name, position, created_at"
@@ -234,6 +235,13 @@ async def create_dataset(conn: Connection, project_id: int, name: str) -> Datase
     return _dataset(row)
 
 
+async def get_dataset(conn: Connection, dataset_id: int) -> Dataset:
+    row = await conn.fetchrow(SELECT_DATASET_SQL, dataset_id)
+    if row is None:
+        raise NotFoundError("dataset não encontrado")
+    return _dataset(row)
+
+
 async def create_class(conn: Connection, project_id: int, name: str, position: int) -> LabelClass:
     failure: BaseException | None = None
     try:
@@ -274,6 +282,12 @@ async def insert_image(
     if existing is None:
         raise NotFoundError("dataset não encontrado")
     return _image(existing), False
+
+
+async def get_image_by_sha(conn: Connection, dataset_id: int, sha256: str) -> Image | None:
+    """Imagem do dataset com esse SHA-256, ou `None` (base da deduplicação do upload)."""
+    row = await conn.fetchrow(SELECT_IMAGE_BY_SHA_SQL, dataset_id, sha256)
+    return None if row is None else _image(row)
 
 
 async def insert_annotations(

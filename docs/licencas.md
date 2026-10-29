@@ -35,6 +35,7 @@ Ultralytics (AGPL-3.0).
 | uvicorn | 0.54.0 | BSD-3-Clause | https://github.com/Kludex/uvicorn |
 | asyncpg | 0.32.0 | Apache-2.0 | https://github.com/MagicStack/asyncpg |
 | boto3 | 1.43.120 | Apache-2.0 | https://github.com/boto/boto3 |
+| python-multipart | 0.0.32 | Apache-2.0 | https://github.com/Kludex/python-multipart |
 | httpx | 0.28.1 | BSD-3-Clause | https://github.com/encode/httpx |
 | pyyaml | 6.0.3 | MIT | https://github.com/yaml/pyyaml |
 | types-PyYAML | 6.0.12.20260906 | Apache-2.0 | https://github.com/python/typeshed |
