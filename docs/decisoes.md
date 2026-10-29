@@ -386,6 +386,17 @@ Pinagem: major
     escrita concorrente de linha e não outra importação. Mensagem imprecisa, comportamento seguro.
   - Nenhum 503 envia `Retry-After` (`banco_indisponivel`, `banco_timeout_conexao`,
     `importacao_em_andamento`): o cliente decide o intervalo. Débito para todos os 503 da API.
+- Checagem de DoS (regra acrescentada na F1-07): nenhum custo por item fora do coletor quando ele
+  está cheio. Nada proporcional ao tamanho de um nome ou mensagem do usuário pode ser calculado por
+  item que o `ErrorCollector` vai descartar (limite de 100 por tipo): mensagens com nome e o campo
+  `file` são passados como funções sem argumentos (`LazyText`) e só são chamadas se o item for
+  guardado (`coco_service._lazy`). `shown()` para ao juntar 200 caracteres limpos. Endurecimento
+  de nomes (F1-07): `common.check_class_name` (usado só nas categorias) recusa controles, Cf (bidi,
+  largura zero, BOM) e nome vazio após ignorar invisíveis (espaços Unicode, Cf, preenchimentos como
+  U+3164 e U+2800). `check_name` seguiu inalterado para `file_name`: testes da F1-06
+  (`test_control_characters_and_bidi_are_stripped_from_error_messages` e
+  `test_case_difference_does_not_match_and_error_is_safe`) fixam `file_name` com controles/bidi
+  aceitos e saneados nas mensagens; mudar isso é decisão do humano (H-F1-07-9).
 - Testes: HTTP com fakes em `backend/tests/test_api_coco_import.py` e `test_coco_core_static.py`
   (`make check`); fluxo real com Postgres em `backend/tests/test_coco_import_docker.py` (marcador
   `docker`, `make compose-smoke`; só o serviço `db`, imagens com `ObjectStore` em memória).
@@ -467,8 +478,8 @@ Pinagem: major
   importados não é verificada (ressalva do ADR-008).
 - Sem autenticação até a F4-01: não abrir `API_BIND` para a rede com este endpoint antes disso.
 - Custos medidos (pelo implementador nas subtarefas 07b e 07c, CPython 3.13, uma thread, parser de
-  rótulos e `data_yaml`; ambiente de desenvolvimento x86_64 de 2 vCPU, máquina exata não registrada
-  na medição; repetir ao mudar limites ou hardware). Os testes de regressão rodam em thread com
+  rótulos e `data_yaml`; máquina: ambiente de desenvolvimento x86_64, 2 vCPU, CPython 3.13 (sandbox
+  de CI do agente); repetir ao mudar limites ou hardware). Os testes de regressão rodam em thread com
   `join(timeout)` e limite >= 2x o valor medido, nunca abaixo do orçamento de 2 s por caso:
 
   | Caso | Tempo | Memória |
@@ -478,11 +489,30 @@ Pinagem: major
   | 1000 arquivos x 1000 erros cada (coletor limitado) | 0,46 s | 5 MB |
   | Casos de 16 MiB hostis (`\n`, uma linha, `0 0 0 0 0\n`, espaços) recusados | < 0,12 s | não medida |
   | 50 000 arquivos de rótulo de uma linha | 0,58 s | não medida |
+  | 300 000 avisos `caixa_fora_da_imagem`, chave de 1024 caracteres (F1-07 correção) | 0,9 a 1,2 s (era 47,95 s: `shown(chave)` por aviso) | não medida |
+  | 300 000 erros por linha (`0 x`), chave de 1024 caracteres | 0,13 a 0,22 s | não medida |
 
   Os casos de 16 MiB são recusados pelos limites antes dos laços; o custo real está no parse
   legítimo de muitas caixas. Como no ADR-008, o `json.loads` e o `str.split` seguram o GIL: uma
   requisição grande ainda atrasa as demais pelo tempo da tabela; remédio completo e limite de
-  concorrência ficam com a F4-01.
+  concorrência ficam com a F4-01. Os dois casos novos rodam em
+  `test_txt_hardening.py` (thread com `join(timeout)`, limite de 3 s) e conferem o mesmo relatório
+  de antes: total real de 300 000 e 100 itens guardados.
+- Checagem de DoS: nenhum custo por item fora do coletor quando ele está cheio (regra do ADR-008,
+  vale aqui). O parser calcula `shown(chave)` uma vez por arquivo; `ErrorCollector.add` aceita
+  `message` e `file` como funções e só as chama se guardar o item; o serviço usa o mesmo mecanismo.
+  O caso que reprovou a revisão: corpo de 6 MB, chave de 1024 caracteres, 300 000 linhas
+  `0 0.99 0.5 0.5 0.5`, 48 s com o GIL preso.
+- Separadores de coluna: só espaço e tab (vazios descartados; um `\r` final é tolerado). NBSP,
+  U+2028, U+0085, U+001C a U+001F e demais espaços Unicode não separam: colam ao campo e viram
+  `numero_invalido`, `classe_invalida` ou contagem de colunas errada (uma linha só com eles é uma
+  coluna inválida, não linha em branco). Antes, `str.split()` aceitava todos como separador. Dois
+  testes que fixavam o comportamento permissivo foram atualizados com justificativa no próprio
+  teste (`test_lone_cr_is_not_a_line_break`, `test_line_numbers_use_only_lf`).
+- `nc` entre aspas (`nc: "2"`) é recusado com `nc_invalido` e a linha; só inteiro simples vale.
+- Nomes de classe (`names` e `data_yaml`): recusados controles, substitutos, Zl/Zp e Cf (bidi,
+  largura zero, BOM) e nomes vazios após ignorar invisíveis (`nome_invalido`); a mesma regra vale
+  nas categorias COCO (`common.check_class_name`, ver ADR-008).
 - Pendências do humano (padrão adotado entre parênteses; nenhuma é D1 a D5):
   - H-F1-07-1. Nome da rota e uso da palavra "YOLO": `yolo-txt` e "formato YOLO (txt)" (padrão), ou
     `txt-normalizado`; confirmar também se a allowlist da F1-11 aceita o literal.
@@ -499,6 +529,8 @@ Pinagem: major
     real dos datasets dos clientes.
   - H-F1-07-8. Endpoint aberto até a F4-01 (H-F1-05-5, H-F1-06-8); H-F1-06-4 a H-F1-06-7 valem aqui
     com o mesmo padrão e a mesma resposta do humano.
+  - H-F1-07-9. Recusar também controles/Cf em `file_name` do COCO (hoje aceitos e saneados nas
+    mensagens; exigiria mudar testes da F1-06).
 - Testes: HTTP com fakes em `backend/tests/test_api_txt_import.py`; configuração e guardas em
   `test_txt_core_static.py`; serviço e parser em `test_txt_labels_service.py`,
   `test_txt_labels_parser.py` e `test_names_yaml.py`; fluxo real com Postgres em
