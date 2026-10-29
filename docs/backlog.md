@@ -13,7 +13,7 @@ Revisado contra `docs/spec.md` em 28/10/2026. A partir desta revisão, as fases 
 **Fatos informados pelo humano (28/10/2026)**
 - Os modelos de analítico do iNVR são ONNX treinados no Google Colab. O framework de treino, os pesos iniciais e o dataset usados nesses notebooks ainda não estão comprovados; a origem e a licença dependem dos notebooks e dos registros do Colab (ver F1-02 e F5-12 a F5-14). Isso não permite concluir se os modelos são ou não derivados da Ultralytics.
 
-**Próxima tarefa executável: F1-05 (F0-06 está [~]: só restam as pendências H1–H6 do humano; F1-01 e F1-02 também estão livres).**
+**Próxima tarefa executável: F1-06 (importador COCO), ou F1-01/F1-02 (F0-06 está [~]: só restam as pendências H1–H6 do humano).**
 
 ## Fase 0: Fundação técnica (pré-requisito da Fase 1 do plano)
 - [x] F0-01 Estrutura do repositório (backend/, frontend/, docs/, docker/), `pyproject.toml`, ruff, mypy, pytest
@@ -329,7 +329,7 @@ Auditoria de licenças, modelo base, importadores e validação de datasets.
     - H5. Exclusão em cascata sem apagar objetos do S3 (limpeza posterior) é aceitável, ou a exclusão deve ser bloqueada enquanto houver imagens? Recomendação: cascata no banco e limpeza assíncrona depois.
     - H6. Identificadores `bigint` sequenciais (recomendado, simples) ou UUID (menos enumerável se a API for exposta na rede; relevante quando houver autenticação, F4-01).
     - H7. Nomes de projeto e de classe sensíveis a maiúsculas (recomendado, simples) ou únicos sem distinção de caixa (`lower(name)`).
-- [~] F1-05 Upload de imagens para o armazenamento S3 (SeaweedFS) com limites e validação de tipo
+- [x] F1-05 Upload de imagens para o armazenamento S3 (SeaweedFS) com limites e validação de tipo
   - **Dependências:** F1-04, F0-05 (concluídas). **Tamanho:** M (2 a 4 dias). Dividida em três subtarefas de até ~1 dia, na ordem a, b, c, cada uma com `make check` verde ao final: **F1-05a** núcleo puro (limites, inspeção de imagem, nome, chave, leitura em fluxo); **F1-05b** serviço de upload atômico sobre S3 e repositório falsos; **F1-05c** HTTP (multipart, pool preguiçoso, endpoint, ADR-007, testes Docker). Aceite original preservado: arquivo acima do limite retorna 413; tipo falso (extensão `.jpg` com conteúdo não imagem, checado por assinatura) retorna 415; imagem válida grava objeto no bucket e registro no banco com SHA-256; envio duplicado não cria segunda cópia.
   - **Objetivo:** `POST /datasets/{dataset_id}/images` recebe um ou mais arquivos JPEG/PNG (multipart), valida tipo por assinatura e estrutura do cabeçalho (sem decodificar pixels), aplica limites configuráveis, calcula SHA-256 em fluxo, grava o objeto no bucket e o registro em `image` (via `insert_image`), de forma idempotente por `(dataset_id, sha256)`. Fora de escopo: autenticação e perfis (F4-01; o endpoint fica aberto, atrás do bind em 127.0.0.1 da ADR de exposição), listagem/download/exclusão de imagens, miniaturas, importadores (F1-06 a F1-08), limpeza de órfãos no S3 (H5 da F1-04), validação de qualidade (F1-10), formatos além de JPEG e PNG, anotação.
   - **Decisões de projeto (a registrar como ADR-007, status "proposta"):**
