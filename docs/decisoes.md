@@ -347,6 +347,23 @@ Pinagem: major
     ou exigir classes prévias.
   - H-F1-06-7. `iscrowd=1`: ignorar e relatar (padrão) ou tratar como erro.
   - H-F1-06-8. Endpoint aberto até a F4-01, como a F1-05 (H-F1-05-5).
+- Débitos e ressalvas conhecidos (revisão F1-06):
+  - CPU do pré-check de profundidade: é uma varredura por regex em bytes com quantificadores
+    possessivos (sem retrocesso), custo linear no tamanho do arquivo (até 32 MiB), executada em
+    thread. Entradas hostis (`\"` repetido, `"` solto, string gigante sem fechar, milhões de `[`)
+    têm teste de regressão com tempo < 1 s. Um arquivo de 32 MiB ainda ocupa uma thread por
+    algumas centenas de ms; vários envios simultâneos competem por CPU até a F4-01 (autenticação)
+    e um limite de concorrência por rota, ambos pendentes.
+  - TOCTOU de imagens: o bloqueio do projeto não impede upload/remoção de imagens (a F1-05 não o
+    toma). Sob o bloqueio, a fase 2 relê as imagens do dataset e compara com o plano da fase 1; se
+    divergirem, falha com `importacao_invalida` / `dataset_alterado`, sem gravar nada (o cliente
+    repete). Resta uma janela mínima entre a releitura e o commit, aceita: as anotações têm FK para
+    a imagem, então uma remoção nessa janela vira `conflito_integridade` e desfaz tudo.
+  - `lock_timeout` local: vale para a espera do advisory lock e também para espera de bloqueio de
+    linha na mesma transação; ambos viram 503 `importacao_em_andamento`, mesmo quando a causa é uma
+    escrita concorrente de linha e não outra importação. Mensagem imprecisa, comportamento seguro.
+  - Nenhum 503 envia `Retry-After` (`banco_indisponivel`, `banco_timeout_conexao`,
+    `importacao_em_andamento`): o cliente decide o intervalo. Débito para todos os 503 da API.
 - Testes: HTTP com fakes em `backend/tests/test_api_coco_import.py` e `test_coco_core_static.py`
   (`make check`); fluxo real com Postgres em `backend/tests/test_coco_import_docker.py` (marcador
   `docker`, `make compose-smoke`; só o serviço `db`, imagens com `ObjectStore` em memória).
