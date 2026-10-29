@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from inovalytics.imports.errors import CocoImportError, ItemError
+from inovalytics.imports.errors import CocoImportError, ErrorCollector, ItemError
 
 MAX_NAME_CHARS = 1024
 MAX_COORD = 1e9
@@ -114,30 +114,6 @@ def sticks_out(x: float, y: float, w: float, h: float, width: int, height: int) 
         or x + w > width + BORDER_EPS
         or y + h > height + BORDER_EPS
     )
-
-
-class _Collector:
-    """Acumula defeitos guardando no máximo `cap` por tipo (a memória não cresce com o arquivo)."""
-
-    def __init__(self, cap: int) -> None:
-        self._cap = cap
-        self._by_kind: dict[str, list[ItemError]] = {}
-        self.total = 0
-
-    def add(self, code: str, kind: str, id_: int | None, index: int | None, message: str) -> None:
-        self.total += 1
-        bucket = self._by_kind.setdefault(kind, [])
-        if len(bucket) < self._cap:
-            bucket.append(ItemError(code, kind, id_, index, message))
-
-    def items(self) -> list[ItemError]:
-        merged = [e for bucket in self._by_kind.values() for e in bucket]
-        merged.sort(key=ItemError.sort_key)
-        return merged[: self._cap]
-
-    def raise_if_any(self) -> None:
-        if self.total:
-            raise CocoImportError(self.items(), self.total)
 
 
 def _fail(code: str, message: str) -> CocoImportError:
@@ -236,7 +212,7 @@ def _check_name(v: Any) -> bool:
 
 
 def _parse_images(
-    raw: list[Any], lim: CocoLimits, col: _Collector
+    raw: list[Any], lim: CocoLimits, col: ErrorCollector
 ) -> tuple[list[CocoImage], dict[int, CocoImage], set[int]]:
     images: list[CocoImage] = []
     by_id: dict[int, CocoImage] = {}
@@ -272,7 +248,7 @@ def _parse_images(
     return images, by_id, seen
 
 
-def _parse_categories(raw: list[Any], col: _Collector) -> tuple[list[CocoCategory], set[int]]:
+def _parse_categories(raw: list[Any], col: ErrorCollector) -> tuple[list[CocoCategory], set[int]]:
     cats: list[CocoCategory] = []
     ids: set[int] = set()
     names: set[str] = set()
@@ -324,8 +300,8 @@ def _parse_annotations(
     by_id: dict[int, CocoImage],
     image_ids: set[int],
     category_ids: set[int],
-    col: _Collector,
-    warn: _Collector,
+    col: ErrorCollector,
+    warn: ErrorCollector,
 ) -> tuple[list[CocoBox], list[CrowdItem], int]:
     boxes: list[CocoBox] = []
     crowd: list[CrowdItem] = []
@@ -408,8 +384,8 @@ def _parse(data: bytes, lim: CocoLimits) -> ParsedCoco:
         errs.sort(key=ItemError.sort_key)
         raise CocoImportError(errs[: lim.max_errors], len(errs))
 
-    col = _Collector(lim.max_errors)
-    warn = _Collector(lim.max_errors)
+    col = ErrorCollector(lim.max_errors)
+    warn = ErrorCollector(lim.max_errors)
     images, by_id, image_ids = _parse_images(raw_images, lim, col)
     categories, category_ids = _parse_categories(raw_categories, col)
     boxes, crowd, segs = _parse_annotations(
