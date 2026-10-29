@@ -60,6 +60,14 @@ def _run(coro: Any) -> Any:
     return asyncio.run(coro)
 
 
+def _free_port() -> int:
+    import socket
+
+    with socket.socket() as sk:
+        sk.bind(("127.0.0.1", 0))
+        return int(sk.getsockname()[1])
+
+
 async def _wait_pg(dsn: str) -> None:
     deadline = time.time() + 40
     while True:
@@ -84,9 +92,11 @@ def infra(repo_root: Path, tmp_path_factory: pytest.TempPathFactory) -> Iterator
         f"POSTGRES_PASSWORD={pg_pass}\nS3_ACCESS_KEY={ak}\nS3_SECRET_KEY={sk}\n", encoding="utf-8"
     )
     override = tmp / "override.yml"
+    # Portas fixas: com porta efêmera, `stop`/`up` do storage muda a porta mapeada no host.
+    pg_port, s3_port = _free_port(), _free_port()
     override.write_text(
-        'services:\n  db:\n    ports:\n      - "127.0.0.1::5432"\n'
-        '  storage:\n    ports:\n      - "127.0.0.1::8333"\n',
+        f'services:\n  db:\n    ports:\n      - "127.0.0.1:{pg_port}:5432"\n'
+        f'  storage:\n    ports:\n      - "127.0.0.1:{s3_port}:8333"\n',
         encoding="utf-8",
     )
     stub = Infra(Settings(postgres_password=pg_pass), None, repo_root, env, override)
@@ -94,8 +104,6 @@ def infra(repo_root: Path, tmp_path_factory: pytest.TempPathFactory) -> Iterator
         r = stub.dc("up", "-d", "--wait", "db", "storage")
         if r.returncode != 0:
             pytest.fail(f"falha ao subir db/storage: {r.stderr[-800:]}")
-        pg_port = int(stub.dc("port", "db", "5432").stdout.strip().rsplit(":", 1)[1])
-        s3_port = int(stub.dc("port", "storage", "8333").stdout.strip().rsplit(":", 1)[1])
         cfg = Settings(
             postgres_host="127.0.0.1",
             postgres_port=pg_port,
@@ -175,24 +183,7 @@ def client(infra: Infra) -> Iterator[TestClient]:
 
 
 def _post(c: TestClient, w: World, name: str, data: bytes, ctype: str) -> Any:
-    import logging
-
-    records: list[str] = []
-
-    class _Grab(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            records.append(f"{record.name}:{record.levelname}:{record.getMessage()}")
-
-    grab = _Grab()
-    root = logging.getLogger()
-    root.addHandler(grab)
-    try:
-        resp = c.post(w.url, files=[("files", (name, data, ctype))])
-    finally:
-        root.removeHandler(grab)
-    if resp.status_code >= 500:  # diagnóstico: corpo de erro e logs não contêm segredos
-        pytest.fail(f"HTTP {resp.status_code}: {resp.text} | logs: {records[-8:]}")
-    return resp
+    return c.post(w.url, files=[("files", (name, data, ctype))])
 
 
 # 31
@@ -246,7 +237,7 @@ def test_compensation_when_insert_fails(
 
     monkeypatch.setattr(repo, "insert_image", boom)
     r = _post(client, world, "a.png", png(7, 7), "image/png")
-    assert r.status_code == 503
+    assert r.status_code == 503, r.text
     assert world.objects() == [] and world.rows() == []
 
 
@@ -266,7 +257,8 @@ def test_storage_stopped_gives_503_without_row(
 # 35
 def test_bucket_is_private_and_api_stays_healthy(client: TestClient, world: World) -> None:
     data = png(3, 3)
-    assert _post(client, world, "a.png", data, "image/png").status_code == 201
+    r = _post(client, world, "a.png", data, "image/png")
+    assert r.status_code == 201, r.text  # sem segredos: só detail/code
     (key,) = world.objects()
     base = world.infra.settings.s3_endpoint_url
     bucket = world.infra.settings.s3_bucket
