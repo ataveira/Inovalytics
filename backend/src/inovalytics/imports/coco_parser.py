@@ -20,6 +20,7 @@ from typing import Any
 
 from inovalytics.imports.common import (
     bad_constant,
+    check_class_name,
     check_name,
     pairs_hook,
     parse_float,
@@ -229,7 +230,7 @@ def _parse_categories(raw: list[Any], col: ErrorCollector) -> tuple[list[CocoCat
         else:
             ids.add(cid)
         name = it.get("name")
-        if not check_name(name) or not storable(name):
+        if not check_class_name(name) or not storable(name):
             msg = "name deve ser texto não vazio, sem NUL, de até 1024 caracteres"
             col.add("categoria_nome_invalido", K_CATEGORY, ident, i, msg)
             ok = False

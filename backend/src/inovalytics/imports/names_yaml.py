@@ -14,12 +14,11 @@ Mensagens são fixas e não repetem o conteúdo enviado.
 
 from __future__ import annotations
 
-import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from inovalytics.imports.common import MAX_NAME_CHARS
+from inovalytics.imports.common import MAX_NAME_CHARS, name_has_bad_chars, name_is_blank
 from inovalytics.imports.errors import ImportRejectedError, ItemError
 
 K_YAML = "data_yaml"
@@ -29,7 +28,6 @@ EXTRA_YAML_LINES = 200
 
 _BAD_START = "&*!|>%@`"  # âncora, alias, tag, bloco literal/dobrado, diretiva, reservados
 _NULLS = frozenset({"~", "null", "Null", "NULL"})
-_CONTROL = frozenset({"Cc", "Cs", "Zl", "Zp"})
 
 
 @dataclass(frozen=True)
@@ -353,9 +351,8 @@ def _assemble(entries: list[Entry]) -> tuple[list[str], list[int]]:
 
 
 def _clean(name: str) -> bool:
-    if name.isprintable():
-        return True
-    return not any(unicodedata.category(c) in _CONTROL for c in name)
+    """Sem controles, substitutos, separadores de linha/parágrafo nem caracteres Cf (bidi etc.)."""
+    return not name_has_bad_chars(name)
 
 
 def _validate(
@@ -371,7 +368,7 @@ def _validate(
         line = lines[i] if lines is not None else None
         if not isinstance(v, str):
             raise _err("names_tipo_invalido", kind, "nome de classe deve ser texto", line, i)
-        if len(v) > MAX_NAME_CHARS or not v.strip() or not _clean(v):
+        if len(v) > MAX_NAME_CHARS or name_is_blank(v) or not _clean(v):
             msg = "nome de classe deve ser texto não vazio, sem controles, até 1024 caracteres"
             raise _err("nome_invalido", kind, msg, line, i)
         name = v.strip()
@@ -491,9 +488,9 @@ def _parse(text: str, lim: TxtLimits) -> list[str]:
         elif key == "nc":
             if nc is not None:
                 raise _err("nc_invalido", K_YAML, "nc repetido", ln)
-            v, j2, _ = _scalar(s, i, False, ln)
+            v, j2, quoted = _scalar(s, i, False, ln)
             _end_of_line(s, j2, ln)
-            nc = _canonical_index(v)
+            nc = None if quoted else _canonical_index(v)
             if nc is None:
                 raise _err("nc_invalido", K_YAML, "nc deve ser um inteiro", ln)
             nc_line = ln
