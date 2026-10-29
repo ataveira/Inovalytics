@@ -211,6 +211,12 @@ def convert_box(
     y0 = max(ymin - 1.0, 0.0)
     w = xmax - x0
     h = ymax - y0
+    # Excesso de até TOL sobre a imagem inteira (mesma tolerância de `outside`) é arredondamento de
+    # ponto flutuante: recorta para W/H em vez de recusar.
+    if width < w <= width + TOL:
+        w = float(width)
+    if height < h <= height + TOL:
+        h = float(height)
     if not representable(x0, y0, w, h, width, height):
         return None
     outside = xmax > width + TOL or ymax > height + TOL
