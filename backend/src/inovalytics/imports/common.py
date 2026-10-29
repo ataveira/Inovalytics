@@ -79,44 +79,73 @@ _BLANK_FILLERS = frozenset("\u115f\u1160\u2800\u3164\uffa0")
 # (Cf: bidi, largura zero, BOM).
 _BAD_NAME_CATEGORIES = frozenset({"Cc", "Cs", "Zl", "Zp", "Cf"})
 
-
 # ZWNJ/ZWJ são legítimos entre caracteres visíveis (emoji compostos, persa, escritas indianas).
 _JOINERS = frozenset("\u200c\u200d")
 
 
-def _visible(c: str) -> bool:
-    return not (
-        c.isspace()
-        or c in _BLANK_FILLERS
-        or c in _JOINERS
-        or unicodedata.category(c) in _BAD_NAME_CATEGORIES
-    )
+def _build_tables() -> tuple[frozenset[str], frozenset[str], frozenset[str]]:
+    """Tabelas por caractere, calculadas uma vez com o `unicodedata` do próprio processo.
+
+    Servem de pré-filtro em C (`set.isdisjoint`, `set <=`): o laço Python por caractere deixa de
+    existir no caminho comum. A semântica é a da definição original, caractere a caractere.
+    """
+    category = unicodedata.category
+    bad: list[str] = []  # categoria recusada, exceto ZWJ/ZWNJ (tratados à parte)
+    invisible: list[str] = []  # não conta como "visível" ao lado de um ZWJ/ZWNJ
+    blank: list[str] = []  # conta como "vazio" num nome
+    for cp in range(0x110000):
+        c = chr(cp)
+        cat = category(c)
+        is_bad = cat in _BAD_NAME_CATEGORIES
+        space = c.isspace()
+        if is_bad and c not in _JOINERS:
+            bad.append(c)
+        if space or c in _BLANK_FILLERS or c in _JOINERS or is_bad:
+            invisible.append(c)
+        if space or c in _BLANK_FILLERS or cat == "Cf":
+            blank.append(c)
+    return frozenset(bad), frozenset(invisible), frozenset(blank)
+
+
+_BAD_CHARS, _INVISIBLE, _BLANK_CHARS = _build_tables()
+
+
+def _joiners_misplaced(v: str) -> bool:
+    """Algum ZWJ/ZWNJ fora de um par de caracteres visíveis? (só chamado se `v` tem joiner)
+
+    Separa o nome nos joiners (tudo em C): parte vazia = joiner no início, no fim ou colado em
+    outro joiner; senão confere só o último caractere de cada parte e o primeiro da seguinte.
+    """
+    parts = v.replace("\u200c", "\u200d").split("\u200d")
+    if "" in parts:
+        return True
+    edges = {p[-1] for p in parts[:-1]}
+    edges.update(p[0] for p in parts[1:])
+    return not edges.isdisjoint(_INVISIBLE)
 
 
 def name_has_bad_chars(v: str) -> bool:
     """Há controle, substituto, separador de linha/parágrafo ou caractere de formato (Cf)?
 
     Exceção: U+200C e U+200D isolados (no máximo um por posição) entre dois caracteres visíveis.
-    Custo linear no tamanho de `v` (o chamador confere o limite de tamanho antes).
+    Custo em C para nomes comuns (conjunto de caracteres do nome contra a tabela de proibidos); só
+    nomes com ZWJ/ZWNJ e nenhum outro proibido passam pelo laço dos joiners.
     """
     if v.isprintable():
         return False
-    last = len(v) - 1
-    for i, c in enumerate(v):
-        if c in _JOINERS:
-            if 0 < i < last and _visible(v[i - 1]) and _visible(v[i + 1]):
-                continue
-            return True
-        if unicodedata.category(c) in _BAD_NAME_CATEGORIES:
-            return True
-    return False
+    chars = set(v)
+    if not chars.isdisjoint(_BAD_CHARS):
+        return True
+    if chars.isdisjoint(_JOINERS):
+        return False
+    return _joiners_misplaced(v)
 
 
 def name_is_blank(v: str) -> bool:
     """Nome vazio, só espaços ou só invisíveis (espaços Unicode, Cf e preenchimentos sem glifo)."""
     if not v.strip():
         return True
-    return all(c.isspace() or c in _BLANK_FILLERS or unicodedata.category(c) == "Cf" for c in v)
+    return _BLANK_CHARS.issuperset(v)
 
 
 def check_name(v: Any) -> bool:
