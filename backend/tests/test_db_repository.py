@@ -295,12 +295,13 @@ def test_no_new_routes() -> None:
 
     paths = {getattr(r, "path", "") for r in create_app(Settings(postgres_password="x")).routes}
     assert {"/health", "/health/ready"} <= paths
-    # F1-05c, F1-06c e F1-07d liberam somente estas rotas POST.
+    # F1-05c, F1-06c, F1-07d e F1-08d liberam somente estas rotas POST.
     extra = {p for p in paths if p.startswith(("/projects", "/datasets", "/images"))}
     assert extra <= {
         "/datasets/{dataset_id}/images",
         "/datasets/{dataset_id}/imports/coco",
         "/datasets/{dataset_id}/imports/yolo-txt",
+        "/datasets/{dataset_id}/imports/pascal-voc",
     }
 
 
