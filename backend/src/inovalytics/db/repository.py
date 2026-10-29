@@ -36,6 +36,10 @@ class InvalidAnnotationError(InvalidValueError):
     """Anotação rejeitada pelo banco (caixa fora dos limites ou classe de outro projeto)."""
 
 
+class LockTimeoutError(RepositoryError):
+    """O bloqueio consultivo do projeto não foi obtido dentro do `lock_timeout`."""
+
+
 class Connection(Protocol):
     """Subconjunto da conexão asyncpg usado aqui (permite conexão falsa nos testes)."""
 
@@ -87,6 +91,16 @@ class Image:
 
 
 @dataclass(frozen=True)
+class ImportImage:
+    """Visão mínima da imagem para casar nomes e converter caixas (F1-06)."""
+
+    id: int
+    file_name: str
+    width_px: int
+    height_px: int
+
+
+@dataclass(frozen=True)
 class NewAnnotation:
     class_id: int
     x_center: float
@@ -121,6 +135,20 @@ INSERT_CLASS_SQL = (
     "INSERT INTO label_class (project_id, name, position) VALUES ($1, $2, $3) "
     "RETURNING id, project_id, name, position, created_at"
 )
+LIST_CLASSES_SQL = (
+    "SELECT id, project_id, name, position, created_at FROM label_class "
+    "WHERE project_id = $1 ORDER BY position"
+)
+LIST_IMAGES_FOR_IMPORT_SQL = (
+    "SELECT id, file_name, width_px, height_px FROM image WHERE dataset_id = $1 ORDER BY id "
+    "LIMIT $2"
+)
+LIST_ANNOTATIONS_FOR_IMAGES_SQL = (
+    "SELECT id, image_id, project_id, class_id, x_center, y_center, width, height, created_at "
+    "FROM annotation WHERE image_id = ANY($1::bigint[]) ORDER BY id"
+)
+SET_LOCAL_CONFIG_SQL = "SELECT set_config($1, $2, true)"
+LOCK_PROJECT_SQL = "SELECT pg_advisory_xact_lock($1::int, $2::int)"
 INSERT_IMAGE_SQL = (
     "INSERT INTO image (dataset_id, project_id, object_key, file_name, sha256, size_bytes, "
     "width_px, height_px, split) "
@@ -160,6 +188,8 @@ def _failure(
         return fk_error("referência inválida")
     if isinstance(exc, asyncpg.exceptions.CheckViolationError):
         return check_error("valor rejeitado pelas regras do banco")
+    if isinstance(exc, asyncpg.exceptions.LockNotAvailableError):
+        return LockTimeoutError("tempo esgotado ao obter o bloqueio")
     return exc
 
 
@@ -293,7 +323,11 @@ async def get_image_by_sha(conn: Connection, dataset_id: int, sha256: str) -> Im
 async def insert_annotations(
     conn: Connection, image_id: int, boxes: Sequence[NewAnnotation]
 ) -> int:
-    """Grava o lote em uma transação: ou todas as caixas entram, ou nenhuma."""
+    """Grava o lote em uma transação: ou todas as caixas entram, ou nenhuma.
+
+    Chamada dentro de uma transação externa, `conn.transaction()` vira savepoint (correto, mas
+    com custo por imagem); importações em massa usam `insert_annotation_batch`.
+    """
     failure: BaseException | None = None
     try:
         async with conn.transaction():
@@ -316,3 +350,72 @@ async def insert_annotations(
 
 async def list_annotations(conn: Connection, image_id: int) -> list[Annotation]:
     return [_annotation(r) for r in await conn.fetch(LIST_ANNOTATIONS_SQL, image_id)]
+
+
+async def list_classes(conn: Connection, project_id: int) -> list[LabelClass]:
+    """Classes do projeto em ordem de `position`."""
+    return [_class(r) for r in await conn.fetch(LIST_CLASSES_SQL, project_id)]
+
+
+async def list_images_for_import(
+    conn: Connection, dataset_id: int, limit: int
+) -> list[ImportImage]:
+    """Até `limit` imagens do dataset (por id), só com o que o importador precisa."""
+    rows = await conn.fetch(LIST_IMAGES_FOR_IMPORT_SQL, dataset_id, limit)
+    return [ImportImage(r["id"], r["file_name"], r["width_px"], r["height_px"]) for r in rows]
+
+
+async def list_annotations_for_images(
+    conn: Connection, image_ids: Sequence[int]
+) -> list[Annotation]:
+    """Anotações de todas as imagens dadas, em uma só consulta."""
+    return [
+        _annotation(r) for r in await conn.fetch(LIST_ANNOTATIONS_FOR_IMAGES_SQL, list(image_ids))
+    ]
+
+
+IMPORT_LOCK_NAMESPACE = 1_001  # primeira chave do bloqueio consultivo das importações
+DEFAULT_LOCK_TIMEOUT_MS = 10_000
+
+
+async def lock_project_for_import(
+    conn: Connection, project_id: int, timeout_ms: int = DEFAULT_LOCK_TIMEOUT_MS
+) -> None:
+    """Bloqueio consultivo da transação, por projeto; serializa importações concorrentes.
+
+    Deve ser chamada dentro de `conn.transaction()` (o bloqueio e o `lock_timeout` local só
+    valem até o fim da transação). Esgotado o prazo, levanta `LockTimeoutError`. Projetos
+    distintos podem compartilhar a chave (máscara de 31 bits): só serializa a mais, nunca erra.
+    """
+    failure: BaseException | None = None
+    try:
+        await conn.fetchval(SET_LOCAL_CONFIG_SQL, "lock_timeout", str(timeout_ms))
+        await conn.execute(LOCK_PROJECT_SQL, IMPORT_LOCK_NAMESPACE, project_id & 0x7FFFFFFF)
+    except asyncpg.exceptions.PostgresError as exc:
+        failure = _failure(exc, NotFoundError)
+    if failure is not None:
+        raise failure
+
+
+async def insert_annotation_batch(
+    conn: Connection, project_id: int, rows: Sequence[tuple[int, NewAnnotation]]
+) -> int:
+    """Insere `(image_id, caixa)` em um `executemany`, SEM transação própria.
+
+    O chamador abre a transação (a importação segura uma só para tudo). `project_id` precisa ser
+    o do dataset das imagens: as chaves estrangeiras compostas do esquema recusam o resto.
+    """
+    failure: BaseException | None = None
+    try:
+        await conn.executemany(
+            INSERT_ANNOTATION_SQL,
+            [
+                (image_id, project_id, b.class_id, b.x_center, b.y_center, b.width, b.height)
+                for image_id, b in rows
+            ],
+        )
+    except asyncpg.exceptions.PostgresError as exc:
+        failure = _failure(exc, InvalidAnnotationError, InvalidAnnotationError)
+    if failure is not None:
+        raise failure
+    return len(rows)
