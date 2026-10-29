@@ -13,6 +13,7 @@ chave do XML e `<filename>` só são reduzidos a texto e comparados por nome.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -179,7 +180,8 @@ async def import_voc(
     col.absorb(parsed.errors, parsed.errors_total)
     matched = _match(parsed, stored, col)
     bad_size = _check_sizes(parsed, matched, col)
-    planned = _plan(parsed, matched, bad_size, col, warn)
+    # CPU-bound (até 300 000 caixas, ~1 s): fora do laço; só esta thread toca nos coletores agora.
+    planned = await asyncio.to_thread(_plan, parsed, matched, bad_size, col, warn)
     if not create_classes:
         missing_classes(decls, classes, col)
     col.raise_if_any(ImportRejectedError)
