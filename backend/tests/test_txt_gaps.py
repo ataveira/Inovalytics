@@ -162,9 +162,12 @@ def test_crlf_line_numbers_and_blank_lines_with_whitespace_only() -> None:
 
 
 def test_lone_cr_is_not_a_line_break() -> None:
-    # `\r` solto não separa linhas: a linha única fica com colunas demais, sem travar nem fundir
+    # `\r` solto não separa linhas nem colunas (só espaço e tab separam, ADR-009): a linha única
+    # fica com 9 campos (`.1\r1` é um só), sem travar nem fundir. O código passou de
+    # `colunas_excedentes` (10 campos, quando `\r` separava) para `segmentacao_nao_suportada`
+    # (9 campos, ímpar >= 7) só por causa do novo separador; o contrato "uma linha, um erro" fica.
     code, ln = line_err("0 .5 .5 .1 .1\r1 .5 .5 .1 .1")
-    assert (code, ln) == ("colunas_excedentes", 1)
+    assert (code, ln) == ("segmentacao_nao_suportada", 1)
 
 
 def test_whitespace_only_file_is_empty_not_error() -> None:

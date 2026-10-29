@@ -186,10 +186,19 @@ def test_blank_lines_and_crlf_do_not_shift_line_numbers() -> None:
 def test_line_numbers_use_only_lf() -> None:
     odd = "\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029"
     text = f"0 .5 .5 .1 .1{odd}\n0 .5 .5 .1 .1\n"
-    # separadores exóticos não quebram linha: o primeiro 'rótulo' tem 5 campos e vale a linha 1
-    p = parse({"a.txt": text})
-    assert [b.line for b in p.boxes] == [1, 2]
-    assert errs({"a.txt": "\u2028\n0 1 1 1\n"}) == [("colunas_insuficientes", "a.txt", 2)]
+    # separadores exóticos não quebram linha (numeração só por LF) e, desde o ADR-009, também
+    # não separam colunas: colam no último número da linha 1 (`numero_invalido`); a linha 2 segue
+    # válida. Antes, `str.split()` os tratava como espaço e a linha 1 era aceita (permissivo,
+    # trocado de propósito: só espaço e tab separam).
+    assert errs({"a.txt": text}) == [("numero_invalido", "a.txt", 1)]
+    assert [
+        b.line for b in parse({"a.txt": "0 .5 .5 .1 .1\n" + text.split("\n")[1] + "\n"}).boxes
+    ] == [1, 2]
+    # linha só com U+2028 agora é uma coluna (inválida), na linha 1; a linha 2 tem 4 colunas
+    assert errs({"a.txt": "\u2028\n0 1 1 1\n"}) == [
+        ("colunas_insuficientes", "a.txt", 1),
+        ("colunas_insuficientes", "a.txt", 2),
+    ]
 
 
 def test_bom_at_file_start_and_empty_file() -> None:
