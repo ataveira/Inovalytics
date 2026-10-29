@@ -86,6 +86,12 @@ class Settings:
     upload_read_timeout: float = (
         60.0  # leitura do S3 no PUT de upload (s); ver S3_UPLOAD_READ_TIMEOUT
     )
+    import_max_json_bytes: int = 32 * 1024 * 1024
+    import_max_images: int = 50_000
+    import_max_annotations: int = 300_000
+    import_max_categories: int = 1_000
+    import_max_depth: int = 12
+    import_max_errors: int = 100
 
     @property
     def postgres_dsn(self) -> str:
@@ -136,5 +142,23 @@ class Settings:
             ),
             upload_read_timeout=_positive(
                 e, "S3_UPLOAD_READ_TIMEOUT", d.upload_read_timeout, integer=False
+            ),
+            import_max_json_bytes=int(
+                _positive(e, "IMPORT_MAX_JSON_BYTES", d.import_max_json_bytes, integer=True)
+            ),
+            import_max_images=int(
+                _positive(e, "IMPORT_MAX_IMAGES", d.import_max_images, integer=True)
+            ),
+            import_max_annotations=int(
+                _positive(e, "IMPORT_MAX_ANNOTATIONS", d.import_max_annotations, integer=True)
+            ),
+            import_max_categories=int(
+                _positive(e, "IMPORT_MAX_CATEGORIES", d.import_max_categories, integer=True)
+            ),
+            import_max_depth=int(
+                _positive(e, "IMPORT_MAX_DEPTH", d.import_max_depth, integer=True)
+            ),
+            import_max_errors=int(
+                _positive(e, "IMPORT_MAX_ERRORS", d.import_max_errors, integer=True)
             ),
         )
