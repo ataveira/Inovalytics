@@ -175,7 +175,24 @@ def client(infra: Infra) -> Iterator[TestClient]:
 
 
 def _post(c: TestClient, w: World, name: str, data: bytes, ctype: str) -> Any:
-    return c.post(w.url, files=[("files", (name, data, ctype))])
+    import logging
+
+    records: list[str] = []
+
+    class _Grab(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(f"{record.name}:{record.levelname}:{record.getMessage()}")
+
+    grab = _Grab()
+    root = logging.getLogger()
+    root.addHandler(grab)
+    try:
+        resp = c.post(w.url, files=[("files", (name, data, ctype))])
+    finally:
+        root.removeHandler(grab)
+    if resp.status_code >= 500:  # diagnóstico: corpo de erro e logs não contêm segredos
+        pytest.fail(f"HTTP {resp.status_code}: {resp.text} | logs: {records[-8:]}")
+    return resp
 
 
 # 31
