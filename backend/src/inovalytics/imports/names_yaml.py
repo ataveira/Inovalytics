@@ -351,7 +351,7 @@ def _assemble(entries: list[Entry]) -> tuple[list[str], list[int]]:
 
 
 def _clean(name: str) -> bool:
-    """Sem controles, substitutos, separadores de linha/parágrafo nem caracteres Cf (bidi etc.)."""
+    """Sem controles, substitutos, Zl/Zp nem Cf (ZWJ/ZWNJ só entre caracteres visíveis)."""
     return not name_has_bad_chars(name)
 
 

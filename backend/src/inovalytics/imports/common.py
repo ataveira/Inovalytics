@@ -79,14 +79,36 @@ _BLANK_FILLERS = frozenset("\u115f\u1160\u2800\u3164\uffa0")
 _BAD_NAME_CATEGORIES = frozenset({"Cc", "Cs", "Zl", "Zp", "Cf"})
 
 
+# ZWNJ/ZWJ são legítimos entre caracteres visíveis (emoji compostos, persa, escritas indianas).
+_JOINERS = frozenset("\u200c\u200d")
+
+
+def _visible(c: str) -> bool:
+    return not (
+        c.isspace()
+        or c in _BLANK_FILLERS
+        or c in _JOINERS
+        or unicodedata.category(c) in _BAD_NAME_CATEGORIES
+    )
+
+
 def name_has_bad_chars(v: str) -> bool:
     """Há controle, substituto, separador de linha/parágrafo ou caractere de formato (Cf)?
 
+    Exceção: U+200C e U+200D isolados (no máximo um por posição) entre dois caracteres visíveis.
     Custo linear no tamanho de `v` (o chamador confere o limite de tamanho antes).
     """
     if v.isprintable():
         return False
-    return any(unicodedata.category(c) in _BAD_NAME_CATEGORIES for c in v)
+    last = len(v) - 1
+    for i, c in enumerate(v):
+        if c in _JOINERS:
+            if 0 < i < last and _visible(v[i - 1]) and _visible(v[i + 1]):
+                continue
+            return True
+        if unicodedata.category(c) in _BAD_NAME_CATEGORIES:
+            return True
+    return False
 
 
 def name_is_blank(v: str) -> bool:
@@ -103,7 +125,8 @@ def check_name(v: Any) -> bool:
 
 def check_class_name(v: Any) -> bool:
     """Nome de classe/categoria: `check_name` mais sem controles, substitutos, separadores de
-    linha/parágrafo e Cf (bidi, largura zero, BOM), e não vazio após ignorar invisíveis."""
+    linha/parágrafo e Cf (bidi, ZWSP, BOM; ZWJ/ZWNJ só entre caracteres visíveis), e não vazio após
+    ignorar invisíveis."""
     return check_name(v) and not name_is_blank(v) and not name_has_bad_chars(v)
 
 

@@ -149,7 +149,8 @@ BAD_NAMES = [
     "a‮b",  # bidi override
     "a⁦b",  # isolate
     "a​b",  # zero-width space
-    "a‍b",  # zero-width joiner
+    # ZWJ/ZWNJ entre visíveis passaram a valer: ver test_class_name_joiners.py (ADR-008/009)
+    "a‍​b",  # ZWJ ao lado de ZWSP
     "﻿a",  # BOM no início
     "a⁠b",  # word joiner
     "​",  # só invisível

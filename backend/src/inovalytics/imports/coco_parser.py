@@ -231,7 +231,10 @@ def _parse_categories(raw: list[Any], col: ErrorCollector) -> tuple[list[CocoCat
             ids.add(cid)
         name = it.get("name")
         if not check_class_name(name) or not storable(name):
-            msg = "name deve ser texto não vazio, sem NUL, de até 1024 caracteres"
+            msg = (
+                "name deve ser texto não vazio, sem NUL, controles ou caracteres invisíveis, "
+                "até 1024 caracteres"
+            )
             col.add("categoria_nome_invalido", K_CATEGORY, ident, i, msg)
             ok = False
         else:
