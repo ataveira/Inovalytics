@@ -15,15 +15,21 @@ declaradas) e o serviço (dimensões gravadas) usem exatamente a mesma aritméti
 from __future__ import annotations
 
 import json
-import math
 from dataclasses import dataclass
 from typing import Any
 
+from inovalytics.imports.common import (
+    bad_constant,
+    check_name,
+    pairs_hook,
+    parse_float,
+    parse_int,
+    storable,
+)
+from inovalytics.imports.common import depth_exceeded as _depth_exceeded
 from inovalytics.imports.errors import CocoImportError, ErrorCollector, ItemError
 
-MAX_NAME_CHARS = 1024
 MAX_COORD = 1e9
-MAX_INT_DIGITS = 4300
 BORDER_EPS = 1e-9
 
 K_FILE = "arquivo"
@@ -125,51 +131,6 @@ def _is_num(v: Any) -> bool:
     return type(v) in (int, float)
 
 
-def _pairs_hook(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    out: dict[str, Any] = {}
-    for k, v in pairs:
-        if k in out:
-            raise ValueError("chave duplicada")
-        out[k] = v
-    return out
-
-
-def _bad_constant(_: str) -> Any:
-    raise ValueError("constante não finita")
-
-
-def _parse_int(s: str) -> int:
-    if len(s) > MAX_INT_DIGITS:
-        raise ValueError("inteiro grande demais")
-    return int(s)
-
-
-def _parse_float(s: str) -> float:
-    v = float(s)
-    if not math.isfinite(v):
-        raise ValueError("número não finito")
-    return v
-
-
-def _depth_exceeded(root: Any, max_depth: int) -> bool:
-    """Aninhamento de `root` (já parseado) acima de `max_depth`? Percurso iterativo, sem recursão.
-
-    A raiz é o nível 1. Só contêineres entram na pilha; o custo é linear no número de nós.
-    """
-    stack: list[tuple[Any, int]] = [(root, 1)]
-    while stack:
-        node, depth = stack.pop()
-        if not isinstance(node, (dict, list)):
-            continue
-        if depth > max_depth:
-            return True
-        children = node.values() if isinstance(node, dict) else node
-        for child in children:
-            if isinstance(child, (dict, list)):
-                stack.append((child, depth + 1))
-    return False
-
-
 def _load(data: bytes, lim: CocoLimits) -> dict[str, Any]:
     if len(data) > lim.max_json_bytes:
         raise _fail("limite_excedido", "limite excedido: max_json_bytes")
@@ -180,10 +141,10 @@ def _load(data: bytes, lim: CocoLimits) -> dict[str, Any]:
     try:
         obj = json.loads(
             text,
-            object_pairs_hook=_pairs_hook,
-            parse_constant=_bad_constant,
-            parse_int=_parse_int,
-            parse_float=_parse_float,
+            object_pairs_hook=pairs_hook,
+            parse_constant=bad_constant,
+            parse_int=parse_int,
+            parse_float=parse_float,
         )
     except RecursionError:
         # O scanner C do CPython recusa ~1000 níveis de forma barata: só aninhamento causa isso.
@@ -212,21 +173,6 @@ def _section(
     return v
 
 
-def _storable(v: str) -> bool:
-    """Texto gravável no banco: sem NUL e sem substituto isolado (que não codifica em UTF-8)."""
-    if "\x00" in v:
-        return False
-    try:
-        v.encode("utf-8")
-    except UnicodeEncodeError:
-        return False
-    return True
-
-
-def _check_name(v: Any) -> bool:
-    return isinstance(v, str) and bool(v.strip()) and len(v) <= MAX_NAME_CHARS
-
-
 def _parse_images(
     raw: list[Any], lim: CocoLimits, col: ErrorCollector
 ) -> tuple[list[CocoImage], dict[int, CocoImage], set[int]]:
@@ -245,7 +191,7 @@ def _parse_images(
             ok = False
         else:
             seen.add(iid)
-        if not _check_name(it.get("file_name")):
+        if not check_name(it.get("file_name")):
             msg = "file_name deve ser texto não vazio de até 1024 caracteres"
             col.add("imagem_file_name_invalido", K_IMAGE, ident, i, msg)
             ok = False
@@ -283,7 +229,7 @@ def _parse_categories(raw: list[Any], col: ErrorCollector) -> tuple[list[CocoCat
         else:
             ids.add(cid)
         name = it.get("name")
-        if not _check_name(name) or not _storable(name):
+        if not check_name(name) or not storable(name):
             msg = "name deve ser texto não vazio, sem NUL, de até 1024 caracteres"
             col.add("categoria_nome_invalido", K_CATEGORY, ident, i, msg)
             ok = False

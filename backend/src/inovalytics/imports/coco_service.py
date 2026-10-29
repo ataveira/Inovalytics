@@ -13,93 +13,36 @@ disco: o `file_name` do arquivo COCO só é reduzido a texto (`sanitize_file_nam
 
 from __future__ import annotations
 
-import unicodedata
-from collections import Counter
 from collections.abc import Sequence
-from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING
 
-from inovalytics.db.repository import NewAnnotation
 from inovalytics.imports.coco_parser import (
     K_ANNOTATION,
-    K_CATEGORY,
-    K_FILE,
     K_IMAGE,
-    CocoCategory,
     CocoLimits,
     ParsedCoco,
     representable,
     to_normalized,
 )
-from inovalytics.imports.errors import CocoImportError, ErrorCollector, ItemError
+from inovalytics.imports.errors import CocoImportError, ErrorCollector
+from inovalytics.imports.import_core import (
+    ImportReport,
+    Planned,
+    missing_classes,
+    read_stored_images,
+    shown,
+    simulate,
+    write_all,
+)
+from inovalytics.imports.import_core import ImportRepository as CocoRepository
 from inovalytics.uploads.naming import sanitize_file_name
 
 if TYPE_CHECKING:
-    from inovalytics.db.repository import Annotation, Dataset, ImportImage, LabelClass
+    from inovalytics.db.repository import ImportImage
 
 INSERT_CHUNK = 5_000
-SHOWN_NAME_CHARS = 200
 
-_HIDDEN = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
-_Key = tuple[int, int, float, float, float, float]  # imagem, classe, x, y, w, h (normalizados)
-
-
-class CocoRepository(Protocol):
-    """Repositório já ligado a uma conexão (ver `inovalytics.db.repository`)."""
-
-    async def get_dataset(self, dataset_id: int) -> Dataset: ...
-    async def list_images_for_import(
-        self, dataset_id: int, limit: int
-    ) -> Sequence[ImportImage]: ...
-    async def list_classes(self, project_id: int) -> Sequence[LabelClass]: ...
-    async def list_annotations_for_images(
-        self, image_ids: Sequence[int]
-    ) -> Sequence[Annotation]: ...
-    def transaction(self) -> AbstractAsyncContextManager[Any]: ...
-    async def lock_project_for_import(self, project_id: int) -> None: ...
-    async def create_class(self, project_id: int, name: str, position: int) -> LabelClass: ...
-    async def insert_annotation_batch(
-        self, project_id: int, rows: Sequence[tuple[int, NewAnnotation]]
-    ) -> int: ...
-
-
-@dataclass(frozen=True)
-class ImportReport:
-    status: str  # "importado", "sem_alteracoes" ou "simulado"
-    dataset_id: int
-    images_declared: int
-    images_matched: int
-    classes_declared: int
-    classes_created: int
-    classes_existing: int
-    annotations_in_file: int
-    annotations_imported: int
-    annotations_already_existing: int
-    crowd_ignored: int
-    segmentations_ignored: int
-    warnings: tuple[ItemError, ...]
-    warnings_total: int
-
-    @property
-    def warnings_truncated(self) -> bool:
-        return self.warnings_total > len(self.warnings)
-
-
-@dataclass(frozen=True, slots=True)
-class _Planned:
-    image_id: int  # id gravado
-    category_id: int  # id no arquivo
-    norm: tuple[float, float, float, float]
-
-
-def _shown(name: str) -> str:
-    clean = "".join(
-        c
-        for c in name
-        if unicodedata.category(c)[0] != "C" and unicodedata.category(c) not in {"Zl", "Zp"}
-    )
-    return clean[:SHOWN_NAME_CHARS]
+__all__ = ["INSERT_CHUNK", "CocoRepository", "ImportReport", "import_coco"]
 
 
 def _match_images(
@@ -119,7 +62,7 @@ def _match_images(
                 K_IMAGE,
                 img.id,
                 img.index,
-                f"mais de uma imagem do arquivo reduz ao nome '{_shown(name)}'",
+                f"mais de uma imagem do arquivo reduz ao nome '{shown(name)}'",
             )
             continue
         seen_names.add(name)
@@ -130,7 +73,7 @@ def _match_images(
                 K_IMAGE,
                 img.id,
                 img.index,
-                f"imagem '{_shown(img.file_name)}' não encontrada no dataset",
+                f"imagem '{shown(img.file_name)}' não encontrada no dataset",
             )
         elif len(found) > 1:
             col.add(
@@ -138,7 +81,7 @@ def _match_images(
                 K_IMAGE,
                 img.id,
                 img.index,
-                f"mais de uma imagem gravada com o nome '{_shown(name)}'",
+                f"mais de uma imagem gravada com o nome '{shown(name)}'",
             )
         elif (found[0].width_px, found[0].height_px) != (img.width, img.height):
             col.add(
@@ -155,9 +98,9 @@ def _match_images(
 
 def _plan_boxes(
     parsed: ParsedCoco, matched: dict[int, ImportImage], col: ErrorCollector
-) -> list[_Planned]:
+) -> list[Planned]:
     """Converte para normalizado com as dimensões GRAVADAS (nunca as declaradas)."""
-    planned: list[_Planned] = []
+    planned: list[Planned] = []
     for box in parsed.boxes:
         img = matched.get(box.image_id)
         if img is None:
@@ -172,42 +115,8 @@ def _plan_boxes(
             )
             continue
         norm = to_normalized(box.x, box.y, box.w, box.h, img.width_px, img.height_px)
-        planned.append(_Planned(img.id, box.category_id, norm))
+        planned.append(Planned(img.id, box.category_id, norm))
     return planned
-
-
-def _missing_categories(
-    parsed: ParsedCoco, classes: Sequence[LabelClass], col: ErrorCollector | None
-) -> list[CocoCategory]:
-    """Categorias do arquivo sem classe de mesmo nome; com `col`, cada uma vira `classe_ausente`."""
-    names = {c.name for c in classes}
-    missing = [c for c in parsed.categories if c.name not in names]
-    if col is not None:
-        for c in missing:
-            col.add("classe_ausente", K_CATEGORY, c.id, c.index, "classe não existe no projeto")
-    return missing
-
-
-def _excess(
-    planned: Sequence[_Planned],
-    class_by_category: dict[int, int],
-    existing: Sequence[Annotation],
-) -> tuple[list[tuple[int, NewAnnotation]], int]:
-    """Linhas a inserir (excedente do multiconjunto, na ordem do arquivo) e quantas já existem."""
-    have: Counter[_Key] = Counter(
-        (a.image_id, a.class_id, a.x_center, a.y_center, a.width, a.height) for a in existing
-    )
-    rows: list[tuple[int, NewAnnotation]] = []
-    already = 0
-    for p in planned:
-        cid = class_by_category[p.category_id]
-        key: _Key = (p.image_id, cid, *p.norm)
-        if have[key] > 0:
-            have[key] -= 1
-            already += 1
-        else:
-            rows.append((p.image_id, NewAnnotation(cid, *p.norm)))
-    return rows, already
 
 
 def _report(
@@ -254,31 +163,17 @@ async def import_coco(
     project_id = dataset.project_id
 
     # Fase 1: somente leitura; todos os defeitos de uma vez.
-    stored = await repo.list_images_for_import(dataset_id, lim.max_images + 1)
-    if len(stored) > lim.max_images:
-        raise CocoImportError(
-            [
-                ItemError(
-                    "limite_excedido", K_FILE, None, None, "limite excedido: max_images (dataset)"
-                )
-            ]
-        )
+    stored = await read_stored_images(repo, dataset_id, lim.max_images, CocoImportError)
     classes = await repo.list_classes(project_id)
     col = ErrorCollector(lim.max_errors)
     matched = _match_images(parsed, stored, col)
     planned = _plan_boxes(parsed, matched, col)
     if not create_classes:
-        _missing_categories(parsed, classes, col)
+        missing_classes(parsed.categories, classes, col)
     col.raise_if_any()
 
-    image_ids = sorted({p.image_id for p in planned})
-
     if dry_run:
-        missing = _missing_categories(parsed, classes, None)
-        by_name = {c.name: c.id for c in classes}
-        class_by_category = {c.id: by_name.get(c.name, -(c.index + 1)) for c in parsed.categories}
-        existing = await repo.list_annotations_for_images(image_ids) if image_ids else []
-        rows, already = _excess(planned, class_by_category, existing)
+        missing, rows, already = await simulate(repo, parsed.categories, planned, classes)
         return _report(
             "simulado",
             dataset_id,
@@ -288,42 +183,19 @@ async def import_coco(
             already=already,
         )
 
-    # Fase 2: uma transação; o bloqueio vem primeiro e o estado é relido sob ele.
-    async with repo.transaction():
-        await repo.lock_project_for_import(project_id)
-        # As imagens não são protegidas pelo bloqueio do projeto (o upload não o toma): se o
-        # conjunto mudou desde o plano da fase 1, nada é gravado e o cliente repete a chamada.
-        if await repo.list_images_for_import(dataset_id, lim.max_images + 1) != stored:
-            raise CocoImportError(
-                [
-                    ItemError(
-                        "dataset_alterado",
-                        K_FILE,
-                        None,
-                        None,
-                        "as imagens do dataset mudaram durante a importação; nada foi gravado, "
-                        "tente novamente",
-                    )
-                ]
-            )
-        classes = await repo.list_classes(project_id)
-        if not create_classes:
-            late = ErrorCollector(lim.max_errors)
-            _missing_categories(parsed, classes, late)
-            late.raise_if_any()
-        by_name = {c.name: c.id for c in classes}
-        missing = sorted(_missing_categories(parsed, classes, None), key=lambda c: c.id)
-        position = max((c.position for c in classes), default=-1) + 1
-        for cat in missing:
-            made = await repo.create_class(project_id, cat.name, position)
-            by_name[cat.name] = made.id
-            position += 1
-        class_by_category = {c.id: by_name[c.name] for c in parsed.categories}
-        existing = await repo.list_annotations_for_images(image_ids) if image_ids else []
-        rows, already = _excess(planned, class_by_category, existing)
-        for start in range(0, len(rows), INSERT_CHUNK):
-            await repo.insert_annotation_batch(project_id, rows[start : start + INSERT_CHUNK])
-
+    missing, rows, already = await write_all(
+        repo,
+        project_id=project_id,
+        dataset_id=dataset_id,
+        stored=stored,
+        decls=parsed.categories,
+        planned=planned,
+        create_classes=create_classes,
+        max_images=lim.max_images,
+        max_errors=lim.max_errors,
+        chunk=INSERT_CHUNK,  # lido na chamada: os testes podem reduzi-lo
+        exc=CocoImportError,
+    )
     changed = bool(missing) or bool(rows)
     return _report(
         "importado" if changed else "sem_alteracoes",
