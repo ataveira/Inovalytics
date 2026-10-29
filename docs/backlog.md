@@ -13,7 +13,7 @@ Revisado contra `docs/spec.md` em 28/10/2026. A partir desta revisão, as fases 
 **Fatos informados pelo humano (28/10/2026)**
 - Os modelos de analítico do iNVR são ONNX treinados no Google Colab. O framework de treino, os pesos iniciais e o dataset usados nesses notebooks ainda não estão comprovados; a origem e a licença dependem dos notebooks e dos registros do Colab (ver F1-02 e F5-12 a F5-14). Isso não permite concluir se os modelos são ou não derivados da Ultralytics.
 
-**Próxima tarefa executável: F1-07 (importador YOLO; planejada em quatro subtarefas, 07a a 07d), ou F1-01/F1-02 (F0-06 está [~]: só restam as pendências H1–H6 do humano).**
+**Próxima tarefa executável: F1-08 (importador Pascal VOC, XXE), ou F1-01/F1-02 (F0-06 está [~]: só restam as pendências H1–H6 do humano).**
 
 ## Fase 0: Fundação técnica (pré-requisito da Fase 1 do plano)
 - [x] F0-01 Estrutura do repositório (backend/, frontend/, docs/, docker/), `pyproject.toml`, ruff, mypy, pytest
@@ -500,7 +500,7 @@ Auditoria de licenças, modelo base, importadores e validação de datasets.
     - H-F1-06-6. Criar classes ausentes automaticamente, todas as declaradas, mesmo sem uso (padrão) ou só as usadas, ou exigir classes prévias.
     - H-F1-06-7. Anotações `iscrowd=1`: ignorar e relatar (padrão) ou tratar como erro.
     - H-F1-06-8. Endpoint aberto até a F4-01, como a F1-05 (H-F1-05-5); não abrir `API_BIND` para a rede antes disso.
-- [~] F1-07 Importador YOLO (formato de dados `.txt`, implementação própria)
+- [x] F1-07 Importador YOLO (formato de dados `.txt`, implementação própria)
   - **Dependências:** F1-04, F1-05, F1-06 (concluídas; reaproveita seus padrões). **Tamanho:** M. Dividida em quatro subtarefas de até ~1 dia, na ordem a, b, c, d, cada uma com `make check` verde ao final: **F1-07a** base compartilhada e `data.yaml`/`names`; **F1-07b** parser das linhas de rótulo e do corpo; **F1-07c** serviço (casamento, classes, idempotência, transação); **F1-07d** HTTP, configuração, Docker, ADR-009 e documentação.
   - **Aceite original (mantido):** fixture com `data.yaml` e rótulos normalizados importa caixas com coordenadas corretas (tolerância 1e-6); linhas inválidas são reportadas com arquivo e número da linha. A interface fala "formato YOLO (txt)" apenas como nome do formato.
   - **Objetivo:** importar para um dataset existente as caixas de rótulos no formato de dados "YOLO (txt)" (uma linha `classe cx cy w h` normalizada por imagem, mais a lista de nomes de classe do `data.yaml`), casando cada arquivo de rótulo com uma imagem já enviada pela F1-05. Tudo ou nada, relatório por item, idempotente. Como o esquema da F1-04 já guarda centro/largura/altura normalizados, não há conversão geométrica nem uso das dimensões da imagem. Sem dependência nova, sem zip, sem multipart, sem segmentação.
