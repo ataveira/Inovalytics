@@ -363,8 +363,8 @@ Pinagem: major
     <= 0,06 s a 32 MiB. O custo real está no parse legítimo de muitos tokens pequenos, que
     materializa objetos Python: 32 MiB de `[],` ou `{},` levam 1,3 a 1,6 s e ~1,2 GiB de RSS; de `1,`
     2,3 s (o gancho `parse_int` é uma chamada Python por inteiro) e de `1.5,` 1,4 s. Com 16 MiB:
-    0,6 a 1,0 s e ~600 MiB. Por isso o padrão de `IMPORT_MAX_JSON_BYTES` caiu de 32 para 16 MiB
-    (a 32 MiB o pior caso passava de 2 s). Memória do `json.loads`: ~35 a 40 vezes o tamanho do
+    0,6 a 1,0 s e ~700 MiB. Por isso o padrão de `IMPORT_MAX_JSON_BYTES` caiu de 32 para 16 MiB
+    (a 32 MiB o pior caso passava de 2 s). Memória do `json.loads`: até ~45 vezes (732 MiB medidos para 16 MiB) o tamanho do
     arquivo no pior caso (listas ou objetos vazios), acima das "centenas de MB" estimadas antes; é o
     teto a considerar ao dimensionar o contêiner e ao subir o limite.
   - O parse em `asyncio.to_thread` evita bloquear o event loop só enquanto o interpretador
