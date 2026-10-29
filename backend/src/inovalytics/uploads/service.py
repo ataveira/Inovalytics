@@ -94,6 +94,17 @@ async def _compensate(repo: ImageRepository, store: ObjectStore, p: _Prepared, d
                   p.key, type(exc).__name__)  # fmt: skip
 
 
+def _safe_error_label(exc: BaseException) -> str:
+    """Tipo da exceção (+ código S3, se houver); nunca a mensagem, que pode ter endpoint/segredo."""
+    label = type(exc).__name__
+    response = getattr(exc, "response", None)
+    if isinstance(response, dict):
+        code = response.get("Error", {}).get("Code")
+        if isinstance(code, str) and code.isalnum():
+            label += f"/{code}"
+    return label
+
+
 async def _store_one(
     repo: ImageRepository, store: ObjectStore, p: _Prepared, ds: int, split: str | None
 ) -> UploadResult:
@@ -101,13 +112,15 @@ async def _store_one(
     if existing is not None:
         return UploadResult(existing, False)
     put_failed = False
+    put_error = ""
     try:
         p.item.file.seek(0)
         await store.put(p.key, p.item.file, p.info.content_type)
-    except Exception:
+    except Exception as exc:
         put_failed = True
+        put_error = _safe_error_label(exc)
     if put_failed:  # fora do except: o erro original não vira __context__
-        log.error("falha ao gravar objeto key=%s", p.key)
+        log.error("falha ao gravar objeto key=%s erro=%s", p.key, put_error)
         raise StorageUnavailableError("Armazenamento de imagens indisponível.")
     try:
         image, created = await repo.insert_image(
