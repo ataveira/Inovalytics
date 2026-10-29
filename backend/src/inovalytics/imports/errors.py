@@ -19,10 +19,14 @@ class ItemError:
     message: str
     file: str | None = None  # arquivo de rótulo (formatos com vários arquivos)
     line: int | None = None  # linha 1-based dentro do arquivo
+    # Posição do arquivo de origem, para ordenar itens que têm `index` relativo ao arquivo (VOC).
+    # Não é exposto no relatório; 0 nos formatos em que `index` já é global.
+    group: int = 0
 
-    def sort_key(self) -> tuple[str, int, int]:
+    def sort_key(self) -> tuple[str, int, int, int]:
         return (
             self.kind,
+            self.group,
             -1 if self.index is None else self.index,
             -1 if self.line is None else self.line,
         )
@@ -68,6 +72,7 @@ class ErrorCollector:
         *,
         file: LazyText | None = None,
         line: int | None = None,
+        group: int = 0,
     ) -> None:
         """Registra um defeito. `message` e `file` podem ser funções sem argumentos: só são
         chamadas se o item for guardado (ADR-008/009: nenhum custo por item com o coletor cheio)."""
@@ -78,7 +83,7 @@ class ErrorCollector:
         if len(bucket) < self._cap:
             msg = message if isinstance(message, str) else message()
             fname = file if file is None or isinstance(file, str) else file()
-            bucket.append(ItemError(code, kind, id_, index, msg, fname, line))
+            bucket.append(ItemError(code, kind, id_, index, msg, fname, line, group))
 
     def absorb(self, items: Sequence[ItemError], total: int) -> None:
         """Incorpora defeitos já coletados por outra etapa (o `total` real pode ser maior)."""
