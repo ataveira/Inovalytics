@@ -7,10 +7,13 @@ duplicada e constantes não finitas, percurso iterativo de profundidade e valida
 from __future__ import annotations
 
 import math
+import unicodedata
 from typing import Any
 
 MAX_NAME_CHARS = 1024
 MAX_INT_DIGITS = 4300
+SHOWN_NAME_CHARS = 200
+_SHOWN_SCAN_CHARS = 4096  # nunca varre um nome gigante inteiro só para exibir 200 caracteres
 
 
 def pairs_hook(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -71,3 +74,13 @@ def storable(v: str) -> bool:
 
 def check_name(v: Any) -> bool:
     return isinstance(v, str) and bool(v.strip()) and len(v) <= MAX_NAME_CHARS
+
+
+def shown(name: str) -> str:
+    """Nome do usuário para mensagens: sem controles/separadores e até 200 caracteres."""
+    clean = "".join(
+        c
+        for c in name[:_SHOWN_SCAN_CHARS]
+        if unicodedata.category(c)[0] != "C" and unicodedata.category(c) not in {"Zl", "Zp"}
+    )
+    return clean[:SHOWN_NAME_CHARS]

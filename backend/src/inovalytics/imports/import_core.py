@@ -8,7 +8,6 @@ bloco e o tipo de exceção de recusa (`ImportRejectedError` ou subclasse).
 
 from __future__ import annotations
 
-import unicodedata
 from collections import Counter
 from collections.abc import Sequence
 from contextlib import AbstractAsyncContextManager
@@ -21,7 +20,6 @@ from inovalytics.imports.errors import ErrorCollector, ImportRejectedError, Item
 if TYPE_CHECKING:
     from inovalytics.db.repository import Annotation, Dataset, ImportImage, LabelClass
 
-SHOWN_NAME_CHARS = 200
 K_FILE = "arquivo"
 K_CLASS = "categoria"
 
@@ -86,16 +84,6 @@ class Planned:
     image_id: int  # id gravado
     category_id: int  # id da classe na origem
     norm: tuple[float, float, float, float]
-
-
-def shown(name: str) -> str:
-    """Nome do usuário para mensagens: sem controles/separadores e até 200 caracteres."""
-    clean = "".join(
-        c
-        for c in name
-        if unicodedata.category(c)[0] != "C" and unicodedata.category(c) not in {"Zl", "Zp"}
-    )
-    return clean[:SHOWN_NAME_CHARS]
 
 
 def missing_classes(

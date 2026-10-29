@@ -24,13 +24,13 @@ from inovalytics.imports.coco_parser import (
     representable,
     to_normalized,
 )
+from inovalytics.imports.common import shown
 from inovalytics.imports.errors import CocoImportError, ErrorCollector
 from inovalytics.imports.import_core import (
     ImportReport,
     Planned,
     missing_classes,
     read_stored_images,
-    shown,
     simulate,
     write_all,
 )
