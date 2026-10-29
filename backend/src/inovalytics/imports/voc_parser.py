@@ -69,8 +69,9 @@ class VocLimits:
     max_categories: int = 1_000
     max_errors: int = 100
     max_xml_bytes: int = 256 * 1024
-    # Orçamento de '<' entre todos os arquivos. Medido (F1-08b): ~1,5 a 2,6 us por '<' em Python
-    # 3.13 / expat 2.9.0; 600 000 mantém o pior caso legítimo perto de 1,5 s. Reconfirmar na F1-08d.
+    # Orçamento de '<' entre todos os arquivos. Reconfirmado na F1-08d (ADR-010): no orçamento cheio
+    # o pior caso legítimo leva ~0,7 a 1,1 s (Python 3.13, expat 2.9.0); acima dele a recusa leva
+    # dezenas de ms.
     max_total_markup: int = 600_000
     max_depth: int = 16
     max_elements: int = 20_000

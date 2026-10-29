@@ -177,4 +177,3 @@ def test_deleting_the_project_cascades_to_imported_annotations(
     _run(drop())
     for table in ("annotation", "label_class", "image", "dataset", "project"):
         assert world.count(table) == 0, table
-

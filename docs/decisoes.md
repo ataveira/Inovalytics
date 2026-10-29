@@ -538,3 +538,167 @@ Pinagem: major
   `test_txt_core_static.py`; serviço e parser em `test_txt_labels_service.py`,
   `test_txt_labels_parser.py` e `test_names_yaml.py`; fluxo real com Postgres em
   `backend/tests/test_txt_import_docker.py` (marcador `docker`, `make compose-smoke`).
+
+
+## ADR-010: Importação Pascal VOC (F1-08)
+
+- Status: proposta (aguarda o humano nas pendências H-F1-08-1 a H-F1-08-9; os padrões abaixo foram
+  assumidos para destravar a implementação e podem ser trocados). Reaproveita o desenho dos ADR-008
+  e ADR-009: tudo ou nada, relatório por item, idempotência por multiconjunto, mesmos códigos HTTP,
+  mesma função de erros de banco (`_with_repo`), mesmo `RequestBodyLimitMiddleware` com instância
+  e caminho próprios por rota.
+- Rota: `POST /datasets/{dataset_id}/imports/pascal-voc`, query `dry_run` e `create_classes` (iguais
+  às da F1-06/07). "Pascal VOC" é o nome público de um formato; sem vínculo com a marca, sem a
+  palavra "yolo" nem nome de terceiros em módulo, identificador, código ou mensagem (teste estático
+  em `test_voc_config_static.py`).
+- Entrada: corpo `application/json` `{"annotations": {"<nome>.xml": "<texto XML>"}}` (obrigatório,
+  pode ser `{}`; chaves extras ignoradas). JSON em vez de zip (zip bomb, `../`, links, arquivo
+  temporário) e de multipart (limites do parser de formulário); XML cru (`application/xml`,
+  `text/xml`) é recusado com 415. As chaves são rótulos de texto, nunca caminhos de disco ou S3.
+- Respostas: 201 `importado`; 200 `sem_alteracoes` ou `simulado` (`dry_run`); 404
+  `dataset_nao_encontrado`; 413 `requisicao_grande_demais` (por `Content-Length` e em fluxo); 415
+  `tipo_nao_suportado`; 422 `importacao_invalida` (com `erros[]`: `code`, `kind`, `id`, `index`,
+  `message`, `arquivo`, `linha`), `dataset_id_invalido`, `query_invalida`; 409 `dataset_alterado` e
+  `conflito_integridade`; 503 `banco_indisponivel`, `banco_timeout_conexao`,
+  `importacao_em_andamento`; 500 `erro_interno`. O relatório é o da F1-07 mais
+  `ignorados{difficult, truncated, occluded, pose, partes}`, `sem_size` e `ajustes_origem_zero`.
+  O parse roda em `asyncio.to_thread` (teste prova que o laço continua respondendo). A rota não usa S3.
+
+### Parser XML: `pyexpat` com handlers que recusam (H-F1-08-1)
+
+- Comparação: `xml.etree`/`minidom`/`sax` montam a árvore inteira (memória de 10 a 30 vezes o
+  arquivo), habilitam DTD e entidades por padrão e não dão ganchos para abortar cedo: descartados.
+  `defusedxml` (PSF-2.0) resolve o mesmo problema sobre o mesmo expat, mas é dependência nova de
+  runtime e o subconjunto VOC dispensa DTD inteiro: é a alternativa se o humano preferir não manter
+  código de segurança próprio. Parser mínimo próprio (regex, varredura de `<`): rejeitado, pois
+  reimplementa referências de caractere, codificação e comentários, com divergência entre o que
+  nós e outros leitores entendem. Escolhido: `xml.parsers.expat` da biblioteca padrão, sem
+  dependência nova (`docs/licencas.md`, `licencas-transitivas.md` e `pyproject.toml` inalterados).
+- Recusados com erro por arquivo (H-F1-08-2): todo DOCTYPE (`doctype_proibido`, antes de qualquer
+  declaração de entidade existir), instrução de processamento (`instrucao_proibida`), CDATA
+  (`cdata_proibido`), entidade não predefinida (`entidade_proibida`), codificação declarada além de
+  UTF-8/US-ASCII (`encoding_nao_suportado`). Sem DOCTYPE só restam as cinco entidades predefinidas
+  e referências numéricas, o que elimina por construção XXE de arquivo e de rede, entidade
+  paramétrica, DTD externo, billion laughs e quadratic blowup, sem depender da versão do expat.
+  XInclude não é processado (`xi:include` é só um elemento desconhecido). VOC real não usa
+  DOCTYPE, PI nem CDATA; alguns exportadores raros emitem; o cliente remove.
+- Entrega em chamada única `Parse(dados, True)`: o limite por arquivo torna isso seguro e evita o
+  reparse quadrático de tokens longos em entrega fragmentada (CVE-2023-52425). `bytes.count(b"<")`
+  é conferido antes de parsear.
+- Mensagens de erro do expat viram códigos e frases fixas (nunca repetem o conteúdo);
+  `lineno` vira `linha`.
+
+### Desvios do plano original
+
+- O parser (`voc_parser.py`) é puro e não conhece as dimensões da imagem. A conversão
+  (`convert_box`), o aviso `caixa_fora_da_imagem` e a conferência de `<size>`
+  (`tamanho_divergente`) ficam no serviço (`voc_service.py`), que conhece as dimensões gravadas.
+- `ItemError` ganhou o campo `group` (posição do arquivo) para ordenar erros de objeto por arquivo
+  de origem.
+- Códigos: `xml_malformado` (qualquer defeito de sintaxe do expat, com a linha) e `classe_invalida`
+  (nome de classe com controles, Cf/bidi, vazio após ignorar invisíveis) são códigos desta tarefa;
+  o plano só os citava de passagem.
+- `max_total_markup` (orçamento de `<` entre todos os arquivos) é constante do `VocLimits`
+  (600 000), não variável de ambiente: o plano só pedia `IMPORT_MAX_XML_BYTES`.
+- A conversão de caixa e o casador de imagens foram extraídos para o núcleo compartilhado
+  (`common.py`/`import_core.py`) em commit próprio, sem alterar teste da F1-06/07.
+
+### Regras de domínio
+
+- Geometria (H-F1-08-4): índices de pixel 1-based e inclusivos do devkit. Com `W`, `H` as dimensões
+  GRAVADAS (nunca as do XML): `x0 = max(xmin - 1, 0)`, `x1 = xmax`, `cx = (x0 + x1) / (2W)`,
+  `w = (x1 - x0) / W` (idem em y). Exemplo (imagem 200x100): `51,26,150,75` dá
+  `(0.5, 0.5, 0.5, 0.5)`. `xmin=0` é aceito, ajustado e contado em `ajustes_origem_zero`.
+  `xmax < xmin`, valor negativo ou não numérico = erro; `xmax == xmin` é válido. Passar da borda
+  (tolerância 1e-6) grava sem recorte e gera aviso; o que o esquema não guarda é
+  `caixa_nao_representavel`.
+- `<size>` (H-F1-08-5): opcional; presente e diferente do gravado (inclusive `0`) =
+  `tamanho_divergente`; ausente = usa o gravado e conta `sem_size`.
+- `difficult`, `truncated`, `occluded`, `pose`, `<part>` (H-F1-08-3): o esquema não os guarda;
+  importa-se o objeto e conta-se em `ignorados`. Nada é descartado em silêncio.
+- Casamento XML-imagem (H-F1-08-6): chave termina em `.xml`; `<filename>` com extensão cujo nome
+  difere da chave = `nome_divergente`; com extensão e coerente, casa por nome exato (sensível a
+  maiúsculas); sem extensão ou ausente, casa por nome-base (colisão = `imagem_ambigua`); duas
+  chaves para a mesma imagem = `rotulo_nome_duplicado`. Imagem sem XML fica intacta.
+- Classes (H-F1-08-8): as de `<object><name>`, nome exato após `strip`; `create_classes=true`
+  cria só as usadas, na ordem da primeira aparição; `false` com ausente = `classe_ausente`.
+- Lotes: o corpo é limitado a 16 MiB e a marcação total a 600 000 `<` (cerca de 7 100 arquivos
+  típicos por requisição). Como a importação é idempotente, o cliente envia em lotes, cada um tudo
+  ou nada.
+
+### Limites (H-F1-08-7)
+
+`IMPORT_MAX_JSON_BYTES` (16 MiB), `IMPORT_MAX_IMAGES` (50 000 arquivos), `IMPORT_MAX_ANNOTATIONS`
+(300 000 objetos), `IMPORT_MAX_CATEGORIES` (1 000), `IMPORT_MAX_ERRORS` (100), nova
+`IMPORT_MAX_XML_BYTES` (256 KiB por XML, em bytes UTF-8). Constantes: chave 1024 caracteres,
+profundidade 16, 20 000 elementos por arquivo, 32 atributos, texto de campo 1024 caracteres,
+`max_total_markup` 600 000. Todos conferidos antes dos laços e de construir estruturas de domínio.
+
+### Regra de DoS: sem custo por item fora do coletor
+
+Vale a regra dos ADR-008 e ADR-009: depois que o `ErrorCollector` está cheio, nenhum item custa
+mais que a contagem. Mensagens, nomes de arquivo e linhas são `LazyText`/funções só chamadas se o
+item for guardado (`ErrorCollector.add` aceita `message` e `file` como funções). O total real
+continua exato (`erros_total`). Os limites de bytes, de `<` e de objetos saem em varreduras em C
+antes do laço de parse, e o leitor aborta dentro dos handlers sem percorrer o resto.
+
+### Medições reais
+
+Máquina: Intel Xeon 2,1 GHz, 2 CPUs, Linux 6.18; Python 3.13.18; `pyexpat.EXPAT_VERSION` =
+`expat_2.9.0`. Tempo: mediana de 3 execuções (1 nas sequências longas), chamada direta, sem rede,
+sem banco. Pico de memória: `tracemalloc` em execução separada (infla o tempo, por isso não é
+a mesma execução). O tempo inclui a decodificação do JSON no caso de corpo.
+
+| Caso | Resultado | Tempo (ms) | Pico (MiB) |
+|---|---|---|---|
+| billion laughs clássico | `doctype_proibido` | < 0,1 | < 0,1 |
+| billion laughs com entidade paramétrica | `doctype_proibido` | < 0,1 | < 0,1 |
+| quadratic blowup (50 KiB x 50 000) | `doctype_proibido` | 0,2 | 0,5 |
+| 256 KiB de `<a>` aninhados | `limite_excedido` | 0,2 | 0,3 |
+| 256 KiB de `<a/>` | `limite_excedido` | 0,1 | 0,3 |
+| 256 KiB de espaços | aceito (documento vazio de dados) | 0,9 | 0,8 |
+| 256 KiB de comentários | aceito | 0,9 | 0,5 |
+| um texto único de 256 KiB | `limite_excedido` | 0,3 | 0,8 |
+| atributos (256 KiB) | `limite_excedido` | 10,3 | 5,9 |
+| atributo de 200 KiB | aceito | 0,3 | 0,9 |
+| nome de elemento de 256 KiB | aceito | 3,0 | 1,5 |
+| `<a/>` 256 KiB sem teto de marcação (só limite de elementos) | `limite_excedido` | 10,1 | 1,3 |
+| 1 000 arquivos hostis em sequência (sem teto de marcação) | todos recusados | 2 925 no total (2,9 por arquivo) | 1,3 |
+| 5 arquivos de lixo de 256 KiB | recusados | 290 no total | 4,7 |
+| corpo de 25 MiB (100 x 256 KiB) | `limite_excedido: max_json_bytes` | < 0,1 | < 0,1 |
+| 16 MiB compactos (1 591 arquivos, 159 100 objetos, 2,23 milhões de `<`) | `limite_excedido: max_total_markup` | 49 | 32,2 |
+| os mesmos 16 MiB sem o orçamento de marcação (só para referência) | aceito | 3 315 | 51,9 |
+| no orçamento cheio, objetos compactos (4,3 MiB, 427 arquivos, 42 700 objetos, 598 654 `<`) | aceito | 733 (máx. 931) | 14,9 |
+| 600 001 `<` (um arquivo a mais) | `limite_excedido: max_total_markup` | 10 | 8,7 |
+| 7 300 arquivos típicos (1 002 bytes, 3 objetos, 84 `<`; 8,2 MiB; 613 200 `<`) | `limite_excedido: max_total_markup` | 38 | 16,7 |
+| 7 142 arquivos típicos (o máximo que cabe no orçamento; 8,0 MiB) | aceito | 1 040 (máx. 1 072) | 16,3 |
+
+Conclusões: (1) nenhum caso passa de 2 s; o pior caso legítimo (orçamento cheio) leva cerca de
+0,7 a 1,1 s, então `max_total_markup` = 600 000 foi mantido e a margem de teste é >= 2x (testes com
+limite de 4 s em `test_voc_budget.py` e `test_voc_parser.py`). (2) O pior caso por arquivo
+isolado (atributos, 10 ms) e as recusas por DOCTYPE (< 1 ms) são desprezíveis. (3) O corpo de
+16 MiB de objetos compactos NÃO é aceito: o orçamento de marcação o recusa em 49 ms; sem ele
+custaria 3,3 s com o GIL preso, que é o motivo do orçamento. (4) O plano citava 7 300 arquivos
+típicos; com o arquivo sintético de 84 `<` cabem 7 142 (com 70 `<`, de dois objetos, cabem 8 571).
+(5) Reproduzir: o script de medição não é versionado; os casos são os de
+`backend/tests/_xml_cases.py` e a fixture de `test_voc_budget.py`.
+
+### Pendências do humano (padrão adotado entre parênteses; nenhuma é D1 a D5)
+
+- H-F1-08-1. Parser: `pyexpat` com handlers que recusam DOCTYPE (padrão) ou `defusedxml`.
+- H-F1-08-2. Recusar DOCTYPE, PI e CDATA (padrão) ou aceitar DOCTYPE somente vazio.
+- H-F1-08-3. `difficult=1`, `truncated`, `occluded`, `pose`: importar e contar (padrão), descartar
+  `difficult` ou migração 0002 com colunas.
+- H-F1-08-4. Convenção 1-based inclusiva com `xmin=0` ajustado e contado (padrão) ou 0-based.
+- H-F1-08-5. `<size>` divergente ou zero = erro (padrão) ou ignorar com aviso.
+- H-F1-08-6. `<filename>` autoritativo com recusa de divergência (padrão) ou só pela chave.
+- H-F1-08-7. Limites (256 KiB por XML, 16 MiB de corpo, 50 000 arquivos, 300 000 objetos, 600 000
+  `<` no total): ajustar ao tamanho real dos datasets dos clientes.
+- H-F1-08-8. Classes: criar só as usadas (padrão), exigir prévias ou aceitar lista `names`.
+- H-F1-08-9. Endpoint aberto até a F4-01 (como H-F1-05-5, H-F1-06-8, H-F1-07-8); `API_BIND` fica em
+  127.0.0.1. As H-F1-06-4 a H-F1-06-7 valem aqui com o mesmo padrão.
+- Testes: HTTP com fakes em `test_api_voc_import.py`; XXE de ponta a ponta (arquivo sentinela e
+  servidor local que falha se contatado) em `test_api_voc_xxe.py`; configuração e guardas em
+  `test_voc_config_static.py`; orçamento em `test_voc_budget.py`; leitor, parser e serviço em
+  `test_xml_reader*.py`, `test_voc_parser.py`, `test_voc_service.py`; fluxo real com Postgres em
+  `test_voc_import_docker.py` (marcador `docker`, `make compose-smoke`).
