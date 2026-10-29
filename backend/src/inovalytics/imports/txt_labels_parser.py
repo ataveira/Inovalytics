@@ -102,8 +102,13 @@ def _limit(name: str) -> ImportRejectedError:
 
 
 def _fields(line: str) -> list[str]:
-    """Separa os campos de uma linha já conferida (até 1024 caracteres). Ponto de teste."""
-    return line.split()
+    """Separa os campos de uma linha já conferida (até 1024 caracteres). Ponto de teste.
+
+    Separadores: só espaço e tabulação (vazios descartados). NBSP, U+2028, \\x85, \\x1c-\\x1f e
+    demais espaços Unicode NÃO separam: ficam dentro do campo e viram `numero_invalido`,
+    `classe_invalida` ou contagem de colunas errada.
+    """
+    return [p for p in line.replace("\t", " ").split(" ") if p]
 
 
 def _load(data: bytes, lim: TxtLimits) -> dict[str, Any]:
@@ -204,7 +209,7 @@ def _parse(data: bytes, lim: TxtLimits, collect_errors: bool) -> ParsedTxtLabels
         text = labels[key]
         if not isinstance(text, str):
             col.add("rotulo_invalido", K_LABEL, None, fi, "o conteúdo do rótulo deve ser texto",
-                    file=shown(key))  # fmt: skip
+                    file=lambda key=key: shown(key))  # fmt: skip
             continue
         lines_total += text.count("\n")  # varredura em C; nenhum split antes do teste abaixo
     if lines_total > lim.max_annotations + lim.max_images:
@@ -221,17 +226,17 @@ def _parse(data: bytes, lim: TxtLimits, collect_errors: bool) -> ParsedTxtLabels
             continue
         problem = _key_problem(key)
         if problem is not None:
-            col.add(problem[0], K_LABEL, None, fi, problem[1], file=shown(key))
+            col.add(problem[0], K_LABEL, None, fi, problem[1], file=lambda key=key: shown(key))
             continue
         base = _base_name(key)
         if not base.strip():
             col.add("rotulo_nome_invalido", K_LABEL, None, fi, "nome do rótulo vazio",
-                    file=shown(key))  # fmt: skip
+                    file=lambda key=key: shown(key))  # fmt: skip
             continue
         if text.startswith("﻿"):
             text = text[1:]
         before = len(boxes)
-        fname: str | None = None
+        shown_key = shown(key)  # uma vez por arquivo; avisos e erros reutilizam
         for ln, raw in enumerate(text.split("\n"), 1):
             if raw.endswith("\r"):
                 raw = raw[:-1]
@@ -246,14 +251,12 @@ def _parse(data: bytes, lim: TxtLimits, collect_errors: bool) -> ParsedTxtLabels
                 if n != 5:
                     problem = _columns_problem(n)
                 else:
-                    problem = _box_problem(parts, n_names, boxes, fi, ln, warn, key)
+                    problem = _box_problem(parts, n_names, boxes, fi, ln, warn, shown_key)
             if problem is not None:
-                if fname is None:
-                    fname = shown(key)
-                col.add(problem[0], K_LABEL, None, fi, problem[1], file=fname, line=ln)
+                col.add(problem[0], K_LABEL, None, fi, problem[1], file=shown_key, line=ln)
             elif len(boxes) > max_boxes:
                 raise _limit("max_annotations")
-        files.append(LabelFile(fi, shown(key), base, len(boxes) - before))
+        files.append(LabelFile(fi, shown_key, base, len(boxes) - before))
     if not collect_errors:
         col.raise_if_any(ImportRejectedError)
     return ParsedTxtLabels(
@@ -284,7 +287,7 @@ def _box_problem(
     fi: int,
     ln: int,
     warn: ErrorCollector,
-    key: str,
+    shown_key: str,
 ) -> tuple[str, str] | None:
     """Valida os 5 campos; em caso de sucesso acrescenta a caixa e devolve None."""
     c = parts[0]
@@ -315,7 +318,7 @@ def _box_problem(
             None,
             fi,
             "a caixa ultrapassa a borda da imagem e foi mantida sem recorte",
-            file=shown(key),
+            file=shown_key,
             line=ln,
         )
     boxes.append(TxtBox(fi, ln, int(c), cx, cy, w, h))

@@ -3,7 +3,7 @@ conteúdo do usuário além de nomes truncados."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 
@@ -47,6 +47,8 @@ class CocoImportError(ImportRejectedError):
 
 _MAX_REPORTED_ID = 2**63 - 1
 
+LazyText = str | Callable[[], str]
+
 
 class ErrorCollector:
     """Acumula defeitos guardando no máximo `cap` por tipo (a memória não cresce com o arquivo)."""
@@ -62,17 +64,21 @@ class ErrorCollector:
         kind: str,
         id_: int | None,
         index: int | None,
-        message: str,
+        message: LazyText,
         *,
-        file: str | None = None,
+        file: LazyText | None = None,
         line: int | None = None,
     ) -> None:
+        """Registra um defeito. `message` e `file` podem ser funções sem argumentos: só são
+        chamadas se o item for guardado (ADR-008/009: nenhum custo por item com o coletor cheio)."""
         self.total += 1
         if id_ is not None and not -_MAX_REPORTED_ID <= id_ <= _MAX_REPORTED_ID:
             id_ = None  # inteiro gigante do arquivo não é repetido no relatório (amplificação)
         bucket = self._by_kind.setdefault(kind, [])
         if len(bucket) < self._cap:
-            bucket.append(ItemError(code, kind, id_, index, message, file, line))
+            msg = message if isinstance(message, str) else message()
+            fname = file if file is None or isinstance(file, str) else file()
+            bucket.append(ItemError(code, kind, id_, index, msg, fname, line))
 
     def absorb(self, items: Sequence[ItemError], total: int) -> None:
         """Incorpora defeitos já coletados por outra etapa (o `total` real pode ser maior)."""

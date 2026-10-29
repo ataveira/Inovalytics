@@ -68,7 +68,7 @@ def _match(
     seen: set[str] = set()
     for f in parsed.files:
         name = sanitize_file_name(f.base_name + TXT_SUFFIX)
-        shown_name = shown(f.name)
+        shown_name = lambda f=f: shown(f.name)  # noqa: E731  (lazy: coletor cheio não paga)
         if not name.endswith(TXT_SUFFIX) or name == TXT_SUFFIX:
             col.add("rotulo_nome_invalido", K_LABEL, None, f.index, "nome de rótulo inválido",
                     file=shown_name)  # fmt: skip

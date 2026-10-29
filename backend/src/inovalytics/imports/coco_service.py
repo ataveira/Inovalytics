@@ -13,7 +13,7 @@ disco: o `file_name` do arquivo COCO só é reduzido a texto (`sanitize_file_nam
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 from inovalytics.imports.coco_parser import (
@@ -45,6 +45,11 @@ INSERT_CHUNK = 5_000
 __all__ = ["INSERT_CHUNK", "CocoRepository", "ImportReport", "import_coco"]
 
 
+def _lazy(template: str, raw: str) -> Callable[[], str]:
+    """Mensagem com nome do usuário, montada só se o coletor guardar o item."""
+    return lambda: template.format(shown(raw))
+
+
 def _match_images(
     parsed: ParsedCoco, stored: Sequence[ImportImage], col: ErrorCollector
 ) -> dict[int, ImportImage]:
@@ -62,7 +67,7 @@ def _match_images(
                 K_IMAGE,
                 img.id,
                 img.index,
-                f"mais de uma imagem do arquivo reduz ao nome '{shown(name)}'",
+                _lazy("mais de uma imagem do arquivo reduz ao nome '{}'", name),
             )
             continue
         seen_names.add(name)
@@ -73,7 +78,7 @@ def _match_images(
                 K_IMAGE,
                 img.id,
                 img.index,
-                f"imagem '{shown(img.file_name)}' não encontrada no dataset",
+                _lazy("imagem '{}' não encontrada no dataset", img.file_name),
             )
         elif len(found) > 1:
             col.add(
@@ -81,7 +86,7 @@ def _match_images(
                 K_IMAGE,
                 img.id,
                 img.index,
-                f"mais de uma imagem gravada com o nome '{shown(name)}'",
+                _lazy("mais de uma imagem gravada com o nome '{}'", name),
             )
         elif (found[0].width_px, found[0].height_px) != (img.width, img.height):
             col.add(
