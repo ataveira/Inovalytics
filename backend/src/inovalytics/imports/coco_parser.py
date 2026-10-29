@@ -27,7 +27,10 @@ MAX_COORD = 1e9
 MAX_INT_DIGITS = 4300
 BORDER_EPS = 1e-9
 
-_STRUCT_RE = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"|[\[\]{}]', re.DOTALL)
+# Varredura sobre bytes (UTF-8 nunca reutiliza bytes ASCII em sequências multibyte). Quantificadores
+# possessivos (Python 3.11+) eliminam o retrocesso: custo linear mesmo com `\"` repetido, `"` solto
+# ou string sem fechar (o fecho `"?` é opcional, então a string aberta consome até o fim).
+_STRUCT_RE = re.compile(rb'"[^"\\]*+(?:\\.[^"\\]*+)*+"?|[\[\]{}]', re.DOTALL)
 
 K_FILE = "arquivo"
 K_IMAGE = "imagem"
@@ -154,16 +157,16 @@ def _parse_float(s: str) -> float:
     return v
 
 
-def _depth_exceeded(text: str, max_depth: int) -> bool:
+def _depth_exceeded(data: bytes, max_depth: int) -> bool:
     """Varredura linear de aninhamento fora de strings; para ao exceder `max_depth`."""
     depth = 0
-    for m in _STRUCT_RE.finditer(text):
+    for m in _STRUCT_RE.finditer(data):
         c = m.group()
-        if c in "[{":
+        if c in b"[{":
             depth += 1
             if depth > max_depth:
                 return True
-        elif c in "]}":
+        elif c in b"]}":
             depth -= 1
     return False
 
@@ -175,7 +178,7 @@ def _load(data: bytes, lim: CocoLimits) -> dict[str, Any]:
         text = data.decode("utf-8-sig")
     except UnicodeDecodeError:
         raise _fail("json_invalido", "o arquivo não é UTF-8 válido") from None
-    if _depth_exceeded(text, lim.max_depth):
+    if _depth_exceeded(data, lim.max_depth):
         raise _fail("limite_excedido", "limite excedido: max_depth")
     try:
         obj = json.loads(

@@ -149,6 +149,25 @@ def test_depth_dos_is_fast() -> None:
     assert time.monotonic() - t < 1
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'{"a":"' + b'\\"' * 200_000,  # string nunca fechada com aspas escapadas
+        b'{"a":"' + b'\\\\\\"' * 100_000,  # variante barra-barra-barra-aspas
+        b'{"a":"' + b'x" ' * 200_000,  # aspas soltas no meio
+        b"[" * 300_000 + b'"' + b'\\"' * 100_000,
+        b"{" * 300_000,
+        b'{"a":"' + b"x" * 5_000_000,  # string gigante sem fechar
+        b'{"a":"' + b"\\" * 200_000,  # só barras
+    ],
+)
+def test_depth_scan_is_linear_on_hostile_strings(payload: bytes) -> None:
+    t = time.monotonic()
+    with pytest.raises(CocoImportError):
+        parse_coco(payload, CocoLimits(max_json_bytes=len(payload) + 1))
+    assert time.monotonic() - t < 1
+
+
 def test_depth_exact_and_brackets_in_strings() -> None:
     lim = CocoLimits(max_depth=4)
     ok = b'{"images":[],"annotations":[],"categories":[],"k":[[[]]],"s":"[[[[[[[\\"[[["}'
