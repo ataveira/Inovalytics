@@ -251,7 +251,7 @@ def register_import(app: FastAPI, settings: Settings, provider: DbProvider) -> N
         declared = request.headers.get("content-length")
         if (
             declared is not None
-            and declared.isascii()  # '²' e outros dígitos Unicode passam em isdigit() e quebram int()
+            and declared.isascii()  # '²' passa em isdigit() e quebra int()
             and declared.isdigit()
             and int(declared) > limits.max_json_bytes
         ):
