@@ -392,8 +392,10 @@ Pinagem: major
   `file` são passados como funções sem argumentos (`LazyText`) e só são chamadas se o item for
   guardado (`coco_service._lazy`). `shown()` para ao juntar 200 caracteres limpos. Endurecimento
   de nomes (F1-07): `common.check_class_name` (usado só nas categorias) recusa controles, Cf (bidi,
-  largura zero, BOM) e nome vazio após ignorar invisíveis (espaços Unicode, Cf, preenchimentos como
-  U+3164 e U+2800). `check_name` seguiu inalterado para `file_name`: testes da F1-06
+  ZWSP, BOM) e nome vazio após ignorar invisíveis (espaços Unicode, Cf, preenchimentos como
+  U+3164 e U+2800). U+200C (ZWNJ) e U+200D (ZWJ) são aceitos quando isolados entre dois
+  caracteres visíveis (emoji compostos, persa, escritas indianas); no início, no fim, repetidos ou
+  ao lado de espaço/invisível seguem recusados. `check_name` seguiu inalterado para `file_name`: testes da F1-06
   (`test_control_characters_and_bidi_are_stripped_from_error_messages` e
   `test_case_difference_does_not_match_and_error_is_safe`) fixam `file_name` com controles/bidi
   aceitos e saneados nas mensagens; mudar isso é decisão do humano (H-F1-07-9).
@@ -489,7 +491,7 @@ Pinagem: major
   | 1000 arquivos x 1000 erros cada (coletor limitado) | 0,46 s | 5 MB |
   | Casos de 16 MiB hostis (`\n`, uma linha, `0 0 0 0 0\n`, espaços) recusados | < 0,12 s | não medida |
   | 50 000 arquivos de rótulo de uma linha | 0,58 s | não medida |
-  | 300 000 avisos `caixa_fora_da_imagem`, chave de 1024 caracteres (F1-07 correção) | 0,9 a 1,2 s (era 47,95 s: `shown(chave)` por aviso) | não medida |
+  | 300 000 avisos `caixa_fora_da_imagem`, chave de 1024 caracteres (F1-07 correção) | 0,9 a 1,5 s (era 47,95 s: `shown(chave)` por aviso) | não medida |
   | 300 000 erros por linha (`0 x`), chave de 1024 caracteres | 0,13 a 0,22 s | não medida |
 
   Os casos de 16 MiB são recusados pelos limites antes dos laços; o custo real está no parse
@@ -511,7 +513,8 @@ Pinagem: major
   teste (`test_lone_cr_is_not_a_line_break`, `test_line_numbers_use_only_lf`).
 - `nc` entre aspas (`nc: "2"`) é recusado com `nc_invalido` e a linha; só inteiro simples vale.
 - Nomes de classe (`names` e `data_yaml`): recusados controles, substitutos, Zl/Zp e Cf (bidi,
-  largura zero, BOM) e nomes vazios após ignorar invisíveis (`nome_invalido`); a mesma regra vale
+  ZWSP, BOM; ZWJ/ZWNJ só isolados entre caracteres visíveis) e nomes vazios após ignorar invisíveis
+  (`nome_invalido`); a mesma regra vale
   nas categorias COCO (`common.check_class_name`, ver ADR-008).
 - Pendências do humano (padrão adotado entre parênteses; nenhuma é D1 a D5):
   - H-F1-07-1. Nome da rota e uso da palavra "YOLO": `yolo-txt` e "formato YOLO (txt)" (padrão), ou
