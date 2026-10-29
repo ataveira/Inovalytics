@@ -7,7 +7,7 @@ LICENCAS_ARGS ?=
 
 # Fora do `make check`: exige Docker (pula os testes se ausente).
 compose-smoke:
-	$(PYTHON) -m pytest -m docker backend/tests/test_compose_smoke.py backend/tests/test_db_postgres_docker.py backend/tests/test_upload_docker.py backend/tests/test_coco_import_docker.py
+	$(PYTHON) -m pytest -m docker backend/tests/test_compose_smoke.py backend/tests/test_db_postgres_docker.py backend/tests/test_upload_docker.py backend/tests/test_coco_import_docker.py backend/tests/test_txt_import_docker.py
 
 # Migrações do banco (F1-04b, ADR-006): comando separado, nunca no startup da API.
 # Lê POSTGRES_* do ambiente. Para reverter (só dev/teste): python -m inovalytics.db.migrate down --steps N
