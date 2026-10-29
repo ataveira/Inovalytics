@@ -125,13 +125,17 @@ def _report_json(r: ImportReport) -> dict[str, Any]:
 
 
 def _invalid_response(exc: CocoImportError) -> JSONResponse:
+    # Conflito de estado (as imagens mudaram entre o plano e o bloqueio), não defeito do arquivo:
+    # 409 mantendo o código `dataset_alterado`; o cliente repete a mesma chamada.
+    changed = any(e.code == "dataset_alterado" for e in exc.errors)
     body = error_body(
-        f"Importação recusada: {exc.total} erro(s) no arquivo.", "importacao_invalida"
+        f"Importação recusada: {exc.total} erro(s) no arquivo.",
+        "dataset_alterado" if changed else "importacao_invalida",
     )
     body["erros"] = [_item_json(e) for e in exc.errors]
     body["erros_total"] = exc.total
     body["erros_truncados"] = exc.truncated
-    return JSONResponse(status_code=422, content=body)
+    return JSONResponse(status_code=409 if changed else 422, content=body)
 
 
 def _parse_flag(request: Request, name: str, default: bool) -> bool | None:

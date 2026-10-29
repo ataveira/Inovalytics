@@ -484,6 +484,26 @@ def test_domain_error_in_phase_2_is_409_and_rolled_back(
     _no_leak(r.text, caplog)
 
 
+def test_dataset_changed_during_import_is_409_dataset_alterado(
+    env: Env, caplog: pytest.LogCaptureFixture
+) -> None:
+    real = env.repo.list_images_for_import
+
+    async def racy(dataset_id: int, limit: int) -> list[ImportImage]:
+        out = await real(dataset_id, limit)
+        return [] if "lock" in env.repo.calls else out  # imagens mudaram após o plano
+
+    env.repo.list_images_for_import = racy  # type: ignore[method-assign]
+    with caplog.at_level(logging.DEBUG), env.client() as c:
+        r = post(c)
+    assert r.status_code == 409
+    j = r.json()
+    assert j["code"] == "dataset_alterado"
+    assert [e["code"] for e in j["erros"]] == ["dataset_alterado"]
+    assert env.repo.classes == [] and env.repo.annotations == []
+    _no_leak(r.text, caplog)
+
+
 def test_database_driver_error_and_unexpected_error(
     env: Env, caplog: pytest.LogCaptureFixture
 ) -> None:
