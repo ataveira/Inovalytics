@@ -670,3 +670,16 @@ def test_no_data_files_in_backend(repo_root: Path) -> None:
                 x in p.parts or x.endswith(".egg-info")
                 for x in (".venv", "node_modules", "__pycache__")
             ) or p.parent.name.endswith(".egg-info"), p
+
+
+def test_collect_errors_defers_item_errors_but_not_body_errors() -> None:
+    data = body({"b.txt": "x\n", "a.md": "", "c.txt": "0 .5 .5 .1 .1\n"})
+    p = parse_txt_labels(data, LIM, collect_errors=True)
+    assert p.errors_total == 2 and [(e.code, e.file) for e in p.errors] == [
+        ("rotulo_extensao_invalida", "a.md"),
+        ("colunas_insuficientes", "b.txt"),
+    ]
+    assert p.boxes_count == 1
+    assert refused(data).total == 2
+    with pytest.raises(ImportRejectedError):
+        parse_txt_labels(b"{", LIM, collect_errors=True)

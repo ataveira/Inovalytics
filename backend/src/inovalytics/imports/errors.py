@@ -3,6 +3,7 @@ conteúdo do usuário além de nomes truncados."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 
@@ -72,6 +73,14 @@ class ErrorCollector:
         bucket = self._by_kind.setdefault(kind, [])
         if len(bucket) < self._cap:
             bucket.append(ItemError(code, kind, id_, index, message, file, line))
+
+    def absorb(self, items: Sequence[ItemError], total: int) -> None:
+        """Incorpora defeitos já coletados por outra etapa (o `total` real pode ser maior)."""
+        self.total += total
+        for e in items:
+            bucket = self._by_kind.setdefault(e.kind, [])
+            if len(bucket) < self._cap:
+                bucket.append(e)
 
     def items(self) -> list[ItemError]:
         merged = [e for bucket in self._by_kind.values() for e in bucket]

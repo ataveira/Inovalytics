@@ -1,6 +1,6 @@
 """Parser puro do corpo de importação de rótulos txt (F1-07b). Só biblioteca padrão, sem I/O.
 
-Formato "YOLO (txt)" aqui é só o nome de um formato de dados público: uma linha
+Formato de rótulos txt (um formato de dados público): uma linha
 `classe cx cy w h` (centro, largura e altura normalizados) por caixa, um arquivo por imagem, mais a
 lista de nomes de classe. Escrito a partir dessa descrição pública; nada é lido de disco e nenhuma
 chave do corpo é usada como caminho.
@@ -79,6 +79,10 @@ class ParsedTxtLabels:
     boxes: tuple[TxtBox, ...]  # ordem (arquivo, linha)
     warnings: tuple[ItemError, ...]  # limitada a max_errors; o total real está abaixo
     warnings_total: int
+    # Só com `collect_errors=True`: defeitos por item adiados para o serviço juntá-los aos de
+    # casamento (o relatório mostra tudo de uma vez). Vazio quando o parser já levantou.
+    errors: tuple[ItemError, ...] = ()
+    errors_total: int = 0
 
     @property
     def files_count(self) -> int:
@@ -168,17 +172,23 @@ def _number(tok: str) -> float | None:
     return v if math.isfinite(v) else None
 
 
-def parse_txt_labels(data: bytes, limits: TxtLimits) -> ParsedTxtLabels:
-    """Valida o corpo JSON e extrai nomes, arquivos de rótulo e caixas normalizadas."""
+def parse_txt_labels(
+    data: bytes, limits: TxtLimits, *, collect_errors: bool = False
+) -> ParsedTxtLabels:
+    """Valida o corpo JSON e extrai nomes, arquivos de rótulo e caixas normalizadas.
+
+    Defeitos por item levantam `ImportRejectedError`, salvo com `collect_errors=True`: aí vão para
+    `errors`/`errors_total` do resultado (defeitos do corpo, de `names` e limites sempre levantam).
+    """
     try:
-        return _parse(data, limits)
+        return _parse(data, limits, collect_errors)
     except ImportRejectedError:
         raise
     except Exception:  # defesa final: nenhuma outra exceção escapa
         raise _fail("json_invalido", "o corpo não pôde ser interpretado") from None
 
 
-def _parse(data: bytes, lim: TxtLimits) -> ParsedTxtLabels:
+def _parse(data: bytes, lim: TxtLimits, collect_errors: bool) -> ParsedTxtLabels:
     obj = _load(data, lim)
     labels = obj.get("labels")
     if not isinstance(labels, dict):
@@ -244,9 +254,16 @@ def _parse(data: bytes, lim: TxtLimits) -> ParsedTxtLabels:
             elif len(boxes) > max_boxes:
                 raise _limit("max_annotations")
         files.append(LabelFile(fi, shown(key), base, len(boxes) - before))
-    col.raise_if_any(ImportRejectedError)
+    if not collect_errors:
+        col.raise_if_any(ImportRejectedError)
     return ParsedTxtLabels(
-        tuple(names), tuple(files), tuple(boxes), tuple(warn.items()), warn.total
+        tuple(names),
+        tuple(files),
+        tuple(boxes),
+        tuple(warn.items()),
+        warn.total,
+        tuple(col.items()),
+        col.total,
     )
 
 
