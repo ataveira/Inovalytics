@@ -21,10 +21,8 @@ from inovalytics.imports.coco_parser import (
     K_IMAGE,
     CocoLimits,
     ParsedCoco,
-    representable,
-    to_normalized,
 )
-from inovalytics.imports.common import shown
+from inovalytics.imports.common import representable, shown, to_normalized
 from inovalytics.imports.errors import CocoImportError, ErrorCollector
 from inovalytics.imports.import_core import (
     ImportReport,

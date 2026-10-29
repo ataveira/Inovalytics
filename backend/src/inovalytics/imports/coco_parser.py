@@ -8,8 +8,8 @@ Contrato: `parse_coco(bytes, CocoLimits) -> ParsedCoco` é determinística. Qual
 escapa. Os limites são conferidos antes de construir estruturas de domínio. Não é streaming: o
 limite de bytes é a defesa de memória.
 
-A conversão para coordenadas normalizadas (`to_normalized`) mora aqui para que o parser (dimensões
-declaradas) e o serviço (dimensões gravadas) usem exatamente a mesma aritmética.
+A conversão para coordenadas normalizadas (`to_normalized`, em `common`) é única: o parser
+(dimensões declaradas) e o serviço (dimensões gravadas) usam exatamente a mesma aritmética.
 """
 
 from __future__ import annotations
@@ -25,13 +25,15 @@ from inovalytics.imports.common import (
     pairs_hook,
     parse_float,
     parse_int,
+    representable,
+    sticks_out,
     storable,
 )
 from inovalytics.imports.common import depth_exceeded as _depth_exceeded
+from inovalytics.imports.common import to_normalized as to_normalized  # reexportado (F1-08)
 from inovalytics.imports.errors import CocoImportError, ErrorCollector, ItemError
 
 MAX_COORD = 1e9
-BORDER_EPS = 1e-9
 
 K_FILE = "arquivo"
 K_IMAGE = "imagem"
@@ -95,29 +97,6 @@ class ParsedCoco:
     warnings_total: int
     crowd_ignored: tuple[CrowdItem, ...]
     segmentations_ignored: int
-
-
-def to_normalized(
-    x: float, y: float, w: float, h: float, width: int, height: int
-) -> tuple[float, float, float, float]:
-    """`(x_center, y_center, width, height)` normalizados a partir de pixels e da imagem."""
-    return ((x + w / 2) / width, (y + h / 2) / height, w / width, h / height)
-
-
-def representable(x: float, y: float, w: float, h: float, width: int, height: int) -> bool:
-    """A caixa cabe no esquema (centro em [0, 1], largura e altura em (0, 1])?"""
-    xc, yc, nw, nh = to_normalized(x, y, w, h, width, height)
-    return 0.0 <= xc <= 1.0 and 0.0 <= yc <= 1.0 and 0.0 < nw <= 1.0 and 0.0 < nh <= 1.0
-
-
-def sticks_out(x: float, y: float, w: float, h: float, width: int, height: int) -> bool:
-    """A caixa ultrapassa a borda da imagem (tolerância de 1e-9 no toque exato)?"""
-    return (
-        x < -BORDER_EPS
-        or y < -BORDER_EPS
-        or x + w > width + BORDER_EPS
-        or y + h > height + BORDER_EPS
-    )
 
 
 def _fail(code: str, message: str) -> CocoImportError:

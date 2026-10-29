@@ -15,7 +15,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
 from inovalytics.db.repository import NewAnnotation
+from inovalytics.imports.common import shown
 from inovalytics.imports.errors import ErrorCollector, ImportRejectedError, ItemError
+from inovalytics.uploads.naming import sanitize_file_name
 
 if TYPE_CHECKING:
     from inovalytics.db.repository import Annotation, Dataset, ImportImage, LabelClass
@@ -203,3 +205,83 @@ async def write_all(
         for start in range(0, len(rows), chunk):
             await repo.insert_annotation_batch(project_id, rows[start : start + chunk])
     return missing, rows, already
+
+
+@dataclass(frozen=True, slots=True)
+class MatchItem:
+    """Arquivo de rótulo a casar: posição, nome exibível, nome-base (sem a extensão do rótulo) e,
+    opcionalmente, o nome de imagem declarado dentro do próprio arquivo (`<filename>` do VOC)."""
+
+    index: int
+    name: str
+    base_name: str
+    declared: str | None = None
+
+
+def file_stem(file_name: str) -> str | None:
+    """Nome sem a última extensão (None se não tem extensão)."""
+    dot = file_name.rfind(".")
+    return file_name[:dot] if dot > 0 else None
+
+
+def match_images(
+    items: Sequence[MatchItem],
+    stored: Sequence[ImportImage],
+    col: ErrorCollector,
+    *,
+    suffix: str,
+    kind: str,
+) -> dict[int, ImportImage]:
+    """Posição do arquivo -> imagem gravada. Sensível a maiúsculas; nunca adivinha.
+
+    Sem `declared` (ou com nome vazio/sem extensão): casa pelo nome-base. Com `declared` com
+    extensão: o nome-base precisa coincidir com o dele (`nome_divergente`) e o casamento é pelo
+    nome completo exato. Duas chaves para a mesma imagem = `rotulo_nome_duplicado`.
+    """
+    by_stem: dict[str, list[ImportImage]] = {}
+    by_full: dict[str, list[ImportImage]] = {}
+    for img in stored:
+        stem = file_stem(img.file_name)
+        if stem is not None:
+            by_stem.setdefault(stem, []).append(img)
+        by_full.setdefault(img.file_name, []).append(img)
+    matched: dict[int, ImportImage] = {}
+    seen: set[tuple[bool, str]] = set()
+    used: set[int] = set()
+    for f in items:
+        name = sanitize_file_name(f.base_name + suffix)
+        shown_name = lambda f=f: shown(f.name)  # noqa: E731  (lazy: coletor cheio não paga)
+        if not name.endswith(suffix) or name == suffix:
+            col.add("rotulo_nome_invalido", kind, None, f.index, "nome de rótulo inválido",
+                    file=shown_name)  # fmt: skip
+            continue
+        stem = name[: -len(suffix)]
+        declared = sanitize_file_name(f.declared) if f.declared is not None else None
+        if declared is not None and (not declared.strip() or file_stem(declared) is None):
+            declared = None
+        if declared is not None and file_stem(declared) != stem:
+            msg = "o nome da imagem declarado no arquivo difere do nome do arquivo de rótulo"
+            col.add("nome_divergente", kind, None, f.index, msg, file=shown_name)
+            continue
+        dedupe = (True, declared) if declared is not None else (False, stem)
+        if dedupe in seen:
+            msg = "mais de um arquivo de rótulo reduz ao mesmo nome-base"
+            col.add("rotulo_nome_duplicado", kind, None, f.index, msg, file=shown_name)
+            continue
+        seen.add(dedupe)
+        found = (by_full if declared is not None else by_stem).get(
+            declared if declared is not None else stem, []
+        )
+        if not found:
+            msg = "nenhuma imagem do dataset corresponde ao arquivo de rótulo"
+            col.add("imagem_nao_encontrada", kind, None, f.index, msg, file=shown_name)
+        elif len(found) > 1:
+            msg = "mais de uma imagem gravada corresponde ao arquivo de rótulo"
+            col.add("imagem_ambigua", kind, None, f.index, msg, file=shown_name)
+        elif found[0].id in used:
+            msg = "mais de um arquivo de rótulo reduz ao mesmo nome-base"
+            col.add("rotulo_nome_duplicado", kind, None, f.index, msg, file=shown_name)
+        else:
+            used.add(found[0].id)
+            matched[f.index] = found[0]
+    return matched

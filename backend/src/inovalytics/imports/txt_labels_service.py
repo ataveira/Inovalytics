@@ -16,12 +16,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from inovalytics.imports.common import shown
 from inovalytics.imports.errors import ErrorCollector, ImportRejectedError
 from inovalytics.imports.import_core import (
     ImportReport,
     ImportRepository,
+    MatchItem,
     Planned,
+    match_images,
     missing_classes,
     read_stored_images,
     simulate,
@@ -29,7 +30,6 @@ from inovalytics.imports.import_core import (
 )
 from inovalytics.imports.names_yaml import TxtLimits
 from inovalytics.imports.txt_labels_parser import K_LABEL, ParsedTxtLabels
-from inovalytics.uploads.naming import sanitize_file_name
 
 if TYPE_CHECKING:
     from inovalytics.db.repository import ImportImage
@@ -49,46 +49,12 @@ class _Decl:
     index: int
 
 
-def _stem(file_name: str) -> str | None:
-    """Nome da imagem gravada sem a última extensão (None se não tem extensão)."""
-    dot = file_name.rfind(".")
-    return file_name[:dot] if dot > 0 else None
-
-
 def _match(
     parsed: ParsedTxtLabels, stored: Sequence[ImportImage], col: ErrorCollector
 ) -> dict[int, ImportImage]:
     """Arquivo de rótulo (posição) -> imagem gravada, por nome-base exato (sensível a caixa)."""
-    by_stem: dict[str, list[ImportImage]] = {}
-    for img in stored:
-        stem = _stem(img.file_name)
-        if stem is not None:
-            by_stem.setdefault(stem, []).append(img)
-    matched: dict[int, ImportImage] = {}
-    seen: set[str] = set()
-    for f in parsed.files:
-        name = sanitize_file_name(f.base_name + TXT_SUFFIX)
-        shown_name = lambda f=f: shown(f.name)  # noqa: E731  (lazy: coletor cheio não paga)
-        if not name.endswith(TXT_SUFFIX) or name == TXT_SUFFIX:
-            col.add("rotulo_nome_invalido", K_LABEL, None, f.index, "nome de rótulo inválido",
-                    file=shown_name)  # fmt: skip
-            continue
-        stem = name[: -len(TXT_SUFFIX)]
-        if stem in seen:
-            msg = "mais de um arquivo de rótulo reduz ao mesmo nome-base"
-            col.add("rotulo_nome_duplicado", K_LABEL, None, f.index, msg, file=shown_name)
-            continue
-        seen.add(stem)
-        found = by_stem.get(stem, [])
-        if not found:
-            msg = "nenhuma imagem do dataset corresponde ao arquivo de rótulo"
-            col.add("imagem_nao_encontrada", K_LABEL, None, f.index, msg, file=shown_name)
-        elif len(found) > 1:
-            msg = "mais de uma imagem gravada corresponde ao arquivo de rótulo"
-            col.add("imagem_ambigua", K_LABEL, None, f.index, msg, file=shown_name)
-        else:
-            matched[f.index] = found[0]
-    return matched
+    items = [MatchItem(f.index, f.name, f.base_name) for f in parsed.files]
+    return match_images(items, stored, col, suffix=TXT_SUFFIX, kind=K_LABEL)
 
 
 def _plan(parsed: ParsedTxtLabels, matched: dict[int, ImportImage]) -> list[Planned]:

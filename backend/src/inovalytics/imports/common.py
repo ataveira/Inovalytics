@@ -10,6 +10,7 @@ import math
 import unicodedata
 from typing import Any
 
+BORDER_EPS = 1e-9
 MAX_NAME_CHARS = 1024
 MAX_INT_DIGITS = 4300
 SHOWN_NAME_CHARS = 200
@@ -143,3 +144,26 @@ def shown(name: str) -> str:
             if len(out) >= SHOWN_NAME_CHARS:
                 break
     return "".join(out)
+
+
+def to_normalized(
+    x: float, y: float, w: float, h: float, width: int, height: int
+) -> tuple[float, float, float, float]:
+    """`(x_center, y_center, width, height)` normalizados a partir de pixels e da imagem."""
+    return ((x + w / 2) / width, (y + h / 2) / height, w / width, h / height)
+
+
+def representable(x: float, y: float, w: float, h: float, width: int, height: int) -> bool:
+    """A caixa cabe no esquema (centro em [0, 1], largura e altura em (0, 1])?"""
+    xc, yc, nw, nh = to_normalized(x, y, w, h, width, height)
+    return 0.0 <= xc <= 1.0 and 0.0 <= yc <= 1.0 and 0.0 < nw <= 1.0 and 0.0 < nh <= 1.0
+
+
+def sticks_out(x: float, y: float, w: float, h: float, width: int, height: int) -> bool:
+    """A caixa ultrapassa a borda da imagem (tolerância de 1e-9 no toque exato)?"""
+    return (
+        x < -BORDER_EPS
+        or y < -BORDER_EPS
+        or x + w > width + BORDER_EPS
+        or y + h > height + BORDER_EPS
+    )
