@@ -109,7 +109,7 @@ FORBIDDEN_FOR_VOC = {
     "starlette",
     "ult" + "ralytics",
 }
-VOC_MODULES = ["xml_reader.py", "voc_parser.py"]
+VOC_MODULES = ["xml_reader.py", "voc_parser.py", "voc_service.py"]
 BANNED_WORDS = ("yo" + "lo", "ult" + "ralytics")
 
 

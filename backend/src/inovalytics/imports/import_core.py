@@ -74,7 +74,16 @@ class ImportReport:
     segmentations_ignored: int
     warnings: tuple[ItemError, ...]
     warnings_total: int
-    images_without_boxes: int = 0  # só rótulos txt
+    images_without_boxes: int = 0  # rótulos txt e Pascal VOC
+    # Só Pascal VOC: campos que o esquema não guarda (contados, nunca descartados em silêncio) e
+    # avisos agregados.
+    ignored_difficult: int = 0
+    ignored_truncated: int = 0
+    ignored_occluded: int = 0
+    ignored_pose: int = 0
+    ignored_parts: int = 0
+    without_size: int = 0
+    origin_zero_adjustments: int = 0
 
     @property
     def warnings_truncated(self) -> bool:
