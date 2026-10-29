@@ -182,22 +182,26 @@ class _BodyState:
 
 
 class RequestBodyLimitMiddleware:
-    """Recusa com 413 corpos acima de `limit` nas rotas de upload, antes do multipart.
+    """Recusa com 413 corpos acima de `limit` nos POST cujo caminho casa com `path`.
+
+    O limite é por rota: cada rota registra a sua instância (`path` padrão: upload de imagens),
+    antes do multipart ou do parse do corpo.
 
     Com `Content-Length` acima do limite, responde sem chamar a app nem ler o corpo. Sem
     `Content-Length` (chunked) ou com valor mentiroso, conta os bytes recebidos e, ao passar do
     limite, para de entregar o corpo, descarta a resposta da app e responde 413.
     """
 
-    def __init__(self, app: ASGIApp, limit: int) -> None:
+    def __init__(self, app: ASGIApp, limit: int, path: re.Pattern[str] = _PATH_RE) -> None:
         self.app = app
         self.limit = limit
+        self.path = path
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if (
             scope["type"] != "http"
             or scope["method"] != "POST"
-            or not _PATH_RE.match(scope["path"])
+            or not self.path.match(scope["path"])
         ):
             await self.app(scope, receive, send)
             return

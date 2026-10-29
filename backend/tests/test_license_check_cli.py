@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -157,10 +158,24 @@ def test_make_targets_and_order(repo_root: Path) -> None:
     assert "--write" in _make(repo_root, "-n", "licencas-sync").stdout
 
 
-def test_check_fails_with_forbidden_package(repo_root: Path, tmp_path: Path) -> None:
-    if os.environ.get("INOVALYTICS_NESTED"):
-        pytest.skip("execução aninhada de make check: evita recursão")
-    dst = tmp_path / "repo"
+# Alvos de `check` sem relação com licenças. Na cópia viram no-ops por um `GNUmakefile` que inclui
+# o Makefile e redefine as receitas (o GNU make prefere GNUmakefile, inclusive nos `$(MAKE)` filhos;
+# `-f` não é repassado aos filhos). Assim o resultado depende só do grep e do alvo `licencas`.
+# Antes, o teste rodava lint, mypy e a suíte inteira sobre a cópia da árvore viva (~25 s): qualquer
+# falha ou edição não commitada desses passos abortava o make antes de `licencas`, e o teste
+# falhava sem relação com licenças (instabilidade esporádica, só em execução completa).
+_UNRELATED_STEPS = ("lint-backend", "typecheck", "test", "lint-frontend", "test-frontend")
+
+
+def test_stubbed_steps_exist_in_makefile(repo_root: Path) -> None:
+    # Um alvo renomeado no Makefile deixaria o stub do GNUmakefile criar um alvo novo e inofensivo,
+    # e `check` passaria a rodar a receita real sem que os testes de licença percebessem.
+    makefile = (repo_root / "Makefile").read_text(encoding="utf-8")
+    for target in _UNRELATED_STEPS:
+        assert re.search(rf"^{re.escape(target)}\s*:", makefile, re.MULTILINE), target
+
+
+def _copy_repo(repo_root: Path, dst: Path) -> None:
     shutil.copytree(
         repo_root,
         dst,
@@ -168,11 +183,55 @@ def test_check_fails_with_forbidden_package(repo_root: Path, tmp_path: Path) -> 
             ".git", ".venv", "node_modules", "__pycache__", ".*_cache", "*.egg-info"
         ),
     )
+
+
+def _run_check_licenses_only(dst: Path, site: Path) -> subprocess.CompletedProcess[str]:
+    stubs = "".join(f"{t}:\n\t@true\n" for t in _UNRELATED_STEPS)
+    (dst / "GNUmakefile").write_text(f"include Makefile\n{stubs}", encoding="utf-8")
+    return _make(dst, "check", env={"PYTHONPATH": str(site)})
+
+
+def test_check_fails_with_forbidden_package(repo_root: Path, tmp_path: Path) -> None:
+    if os.environ.get("INOVALYTICS_NESTED"):
+        pytest.skip("execução aninhada de make check: evita recursão")
+    dst = tmp_path / "repo"
+    _copy_repo(repo_root, dst)
     site = tmp_path / "site"
     make_dist(site, "fastapi", version="0.162.0", expression="AGPL-3.0-only", license_field=None)
-    res = _make(dst, "check", env={"PYTHONPATH": str(site)})
+    res = _run_check_licenses_only(dst, site)
+    assert res.returncode != 0, res.stdout[-2500:] + res.stderr[-2500:]
+    assert "[PROIBIDA] python/runtime fastapi" in res.stdout, (
+        res.stdout[-2500:] + res.stderr[-2500:]
+    )
+
+
+def test_forbidden_package_gate_is_independent_of_unrelated_steps(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    """Regressão: erro de ruff/mypy/pytest na árvore não pode mascarar a falha de licença."""
+    if os.environ.get("INOVALYTICS_NESTED"):
+        pytest.skip("execução aninhada de make check: evita recursão")
+    dst = tmp_path / "repo"
+    _copy_repo(repo_root, dst)
+    (dst / "backend/src/inovalytics/bad.py").write_text("import os\n\nx: int = 'a'\n")
+    (dst / "backend/tests/test_always_fails.py").write_text("def test_x():\n    assert False\n")
+    site = tmp_path / "site"
+    make_dist(site, "fastapi", version="0.162.0", expression="AGPL-3.0-only", license_field=None)
+    res = _run_check_licenses_only(dst, site)
     assert res.returncode != 0
     assert "[PROIBIDA] python/runtime fastapi" in res.stdout, res.stdout[-2500:]
+
+
+def test_check_without_forbidden_package_passes_licenses_step(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    """Controle: sem pacote proibido, o alvo `licencas` da cópia termina com sucesso."""
+    if os.environ.get("INOVALYTICS_NESTED"):
+        pytest.skip("execução aninhada de make check: evita recursão")
+    dst = tmp_path / "repo"
+    _copy_repo(repo_root, dst)
+    res = _make(dst, "licencas")
+    assert res.returncode == 0, res.stdout[-2500:]
 
 
 # ---------------------------------------------------------------- offline e árvore real

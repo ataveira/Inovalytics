@@ -273,9 +273,10 @@ def test_no_orm_imports(repo_root: Path) -> None:
 
 # 28
 def test_api_does_not_reference_db_package(repo_root: Path) -> None:
-    # F1-05c: só api/images.py (rota de upload) pode importar inovalytics.db; main.py não.
+    # F1-05c/F1-06c: só api/images.py (upload) e api/imports.py (importação) importam
+    # inovalytics.db; main.py não.
     for path in (repo_root / "backend/src/inovalytics/api").glob("*.py"):
-        if path.name == "images.py":
+        if path.name in {"images.py", "imports.py"}:
             continue
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             mods: list[str] = []
@@ -294,9 +295,9 @@ def test_no_new_routes() -> None:
 
     paths = {getattr(r, "path", "") for r in create_app(Settings(postgres_password="x")).routes}
     assert {"/health", "/health/ready"} <= paths
-    # F1-05c libera somente POST /datasets/{dataset_id}/images.
+    # F1-05c e F1-06c liberam somente estas duas rotas POST.
     extra = {p for p in paths if p.startswith(("/projects", "/datasets", "/images"))}
-    assert extra <= {"/datasets/{dataset_id}/images"}
+    assert extra <= {"/datasets/{dataset_id}/images", "/datasets/{dataset_id}/imports/coco"}
 
 
 # F1-05: get_dataset e get_image_by_sha
