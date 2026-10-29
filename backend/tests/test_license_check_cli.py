@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -164,6 +165,14 @@ def test_make_targets_and_order(repo_root: Path) -> None:
 # falha ou edição não commitada desses passos abortava o make antes de `licencas`, e o teste
 # falhava sem relação com licenças (instabilidade esporádica, só em execução completa).
 _UNRELATED_STEPS = ("lint-backend", "typecheck", "test", "lint-frontend", "test-frontend")
+
+
+def test_stubbed_steps_exist_in_makefile(repo_root: Path) -> None:
+    # Um alvo renomeado no Makefile deixaria o stub do GNUmakefile criar um alvo novo e inofensivo,
+    # e `check` passaria a rodar a receita real sem que os testes de licença percebessem.
+    makefile = (repo_root / "Makefile").read_text(encoding="utf-8")
+    for target in _UNRELATED_STEPS:
+        assert re.search(rf"^{re.escape(target)}\s*:", makefile, re.MULTILINE), target
 
 
 def _copy_repo(repo_root: Path, dst: Path) -> None:
