@@ -86,3 +86,56 @@ def test_xml_reader_calls_parse_once_and_final(repo_root: Path) -> None:
 def test_no_new_xml_dependency_registered(repo_root: Path, name: str) -> None:
     text = (repo_root / name).read_text("utf-8").lower()
     assert "defusedxml" not in text and "lxml" not in text
+
+
+FORBIDDEN_FOR_VOC = {
+    "re",
+    "xml.etree",
+    "xml.dom",
+    "xml.sax",
+    "lxml",
+    "defusedxml",
+    "yaml",
+    "socket",
+    "urllib",
+    "http",
+    "requests",
+    "subprocess",
+    "os",
+    "pathlib",
+    "boto3",
+    "asyncpg",
+    "fastapi",
+    "starlette",
+    "ult" + "ralytics",
+}
+VOC_MODULES = ["xml_reader.py", "voc_parser.py"]
+BANNED_WORDS = ("yo" + "lo", "ult" + "ralytics")
+
+
+@pytest.mark.parametrize("name", VOC_MODULES)
+def test_voc_modules_import_only_pure_stdlib_and_core(repo_root: Path, name: str) -> None:
+    for m in _imports(_src(repo_root, name)):
+        assert not any(m == f or m.startswith(f + ".") for f in FORBIDDEN_FOR_VOC), (name, m)
+
+
+@pytest.mark.parametrize("name", VOC_MODULES)
+def test_voc_modules_have_no_banned_words(repo_root: Path, name: str) -> None:
+    """Nenhum identificador, módulo, código de erro ou mensagem cita marca de terceiros."""
+    text = _src(repo_root, name).read_text("utf-8").lower()
+    for word in BANNED_WORDS:
+        assert word not in text, (name, word)
+    assert not any(w in name for w in BANNED_WORDS)
+
+
+def test_voc_parser_never_reads_files_or_calls_dynamic_code(repo_root: Path) -> None:
+    tree = ast.parse(_src(repo_root, "voc_parser.py").read_text("utf-8"))
+    names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    assert not names & {"open", "eval", "exec", "compile", "__import__", "input"}
+
+
+def test_no_data_files_were_added_to_backend(repo_root: Path) -> None:
+    banned = {".xml", ".jpg", ".jpeg", ".png", ".gif", ".zip", ".dtd"}
+    for p in (repo_root / "backend").rglob("*"):
+        if p.is_file() and "__pycache__" not in p.parts:
+            assert p.suffix.lower() not in banned, p
