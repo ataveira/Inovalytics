@@ -303,8 +303,9 @@ def _box_problem(
         return "caixa_area_zero", "largura e altura devem ser maiores que zero"
     if not (LO <= cx <= HI and LO <= cy <= HI and w <= HI and h <= HI):
         return "valor_fora_do_intervalo", "valor fora de [0, 1] (tolerância de 1e-6)"
-    cx = min(max(cx, 0.0), 1.0)
-    cy = min(max(cy, 0.0), 1.0)
+    # `+ 0.0` normaliza o zero negativo (`-0` vira 0.0), para não gravar `-0.0` no banco
+    cx = min(max(cx, 0.0), 1.0) + 0.0
+    cy = min(max(cy, 0.0), 1.0) + 0.0
     w = min(w, 1.0)
     h = min(h, 1.0)
     if cx - w / 2 < LO or cx + w / 2 > HI or cy - h / 2 < LO or cy + h / 2 > HI:
