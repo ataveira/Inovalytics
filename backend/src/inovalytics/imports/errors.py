@@ -1,7 +1,9 @@
-"""Erros por item das importações. Mensagens fixas em português, sem eco do conteúdo do usuário."""
+"""Erros por item das importações (COCO e rótulos txt). Mensagens fixas em português, sem eco do
+conteúdo do usuário além de nomes truncados."""
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 
@@ -15,14 +17,20 @@ class ItemError:
     id: int | None
     index: int | None
     message: str
+    file: str | None = None  # arquivo de rótulo (formatos com vários arquivos)
+    line: int | None = None  # linha 1-based dentro do arquivo
 
-    def sort_key(self) -> tuple[str, int]:
-        return (self.kind, -1 if self.index is None else self.index)
+    def sort_key(self) -> tuple[str, int, int]:
+        return (
+            self.kind,
+            -1 if self.index is None else self.index,
+            -1 if self.line is None else self.line,
+        )
 
 
-class CocoImportError(Exception):
-    """Importação recusada. `errors` vem ordenada por `(kind, index)` e limitada; `total` é o
-    número real de defeitos e `truncated` indica que a lista foi cortada."""
+class ImportRejectedError(Exception):
+    """Importação recusada. `errors` vem ordenada por `(kind, index, line)` e limitada; `total` é
+    o número real de defeitos e `truncated` indica que a lista foi cortada."""
 
     def __init__(self, errors: list[ItemError], total: int | None = None) -> None:
         errs = sorted(errors, key=ItemError.sort_key)
@@ -33,7 +41,13 @@ class CocoImportError(Exception):
         super().__init__(f"importação recusada ({self.total} erro(s)): {first}")
 
 
+class CocoImportError(ImportRejectedError):
+    """Recusa de uma importação COCO (a rota captura a base `ImportRejectedError`)."""
+
+
 _MAX_REPORTED_ID = 2**63 - 1
+
+LazyText = str | Callable[[], str]
 
 
 class ErrorCollector:
@@ -44,19 +58,41 @@ class ErrorCollector:
         self._by_kind: dict[str, list[ItemError]] = {}
         self.total = 0
 
-    def add(self, code: str, kind: str, id_: int | None, index: int | None, message: str) -> None:
+    def add(
+        self,
+        code: str,
+        kind: str,
+        id_: int | None,
+        index: int | None,
+        message: LazyText,
+        *,
+        file: LazyText | None = None,
+        line: int | None = None,
+    ) -> None:
+        """Registra um defeito. `message` e `file` podem ser funções sem argumentos: só são
+        chamadas se o item for guardado (ADR-008/009: nenhum custo por item com o coletor cheio)."""
         self.total += 1
         if id_ is not None and not -_MAX_REPORTED_ID <= id_ <= _MAX_REPORTED_ID:
             id_ = None  # inteiro gigante do arquivo não é repetido no relatório (amplificação)
         bucket = self._by_kind.setdefault(kind, [])
         if len(bucket) < self._cap:
-            bucket.append(ItemError(code, kind, id_, index, message))
+            msg = message if isinstance(message, str) else message()
+            fname = file if file is None or isinstance(file, str) else file()
+            bucket.append(ItemError(code, kind, id_, index, msg, fname, line))
+
+    def absorb(self, items: Sequence[ItemError], total: int) -> None:
+        """Incorpora defeitos já coletados por outra etapa (o `total` real pode ser maior)."""
+        self.total += total
+        for e in items:
+            bucket = self._by_kind.setdefault(e.kind, [])
+            if len(bucket) < self._cap:
+                bucket.append(e)
 
     def items(self) -> list[ItemError]:
         merged = [e for bucket in self._by_kind.values() for e in bucket]
         merged.sort(key=ItemError.sort_key)
         return merged[: self._cap]
 
-    def raise_if_any(self) -> None:
+    def raise_if_any(self, exc: type[ImportRejectedError] = CocoImportError) -> None:
         if self.total:
-            raise CocoImportError(self.items(), self.total)
+            raise exc(self.items(), self.total)

@@ -1,4 +1,5 @@
-"""Rota de importação COCO (F1-06c, ADR-008): corpo JSON, limite por rota, tudo ou nada.
+"""Rotas de importação COCO (F1-06c, ADR-008) e de rótulos txt (F1-07d, ADR-009): corpo JSON,
+limite por rota, tudo ou nada.
 
 Segundo (e último) módulo da camada `api` que importa `inovalytics.db`; `main.py` só registra a
 rota. Reaproveita o pool preguiçoso, o mapeamento de erros de banco e o formato de corpo de erro da
@@ -36,11 +37,17 @@ from inovalytics.api.images import (
 from inovalytics.db import repository as repo
 from inovalytics.imports.coco_parser import CocoLimits, parse_coco
 from inovalytics.imports.coco_service import ImportReport, import_coco
-from inovalytics.imports.errors import CocoImportError, ItemError
+from inovalytics.imports.errors import ImportRejectedError, ItemError
+from inovalytics.imports.import_core import ImportReport as TxtReport
+from inovalytics.imports.names_yaml import TxtLimits
+from inovalytics.imports.txt_labels_parser import parse_txt_labels
+from inovalytics.imports.txt_labels_service import import_txt_labels
 
 log = logging.getLogger(__name__)
 
 _PATH_RE = re.compile(r"^/datasets/[^/]+/imports/coco/?$")
+TXT_ROUTE = "/datasets/{dataset_id}/imports/yolo-txt"  # único lugar com o nome do formato
+_TXT_PATH_RE = re.compile("^" + TXT_ROUTE.replace("{dataset_id}", "[^/]+") + "/?$")
 _TRUE = frozenset({"true", "1"})
 _FALSE = frozenset({"false", "0"})
 MAX_MESSAGE_CHARS = 300  # defesa em profundidade: nenhuma mensagem de item passa disso
@@ -92,13 +99,19 @@ def limits_from_settings(s: Settings) -> CocoLimits:
 
 
 def _item_json(e: ItemError) -> dict[str, Any]:
-    return {
+    out: dict[str, Any] = {
         "code": e.code,
         "kind": e.kind,
         "id": e.id,
         "index": e.index,
         "message": e.message[:MAX_MESSAGE_CHARS],
     }
+    # Omitidos quando nulos: a resposta COCO continua idêntica byte a byte.
+    if e.file is not None:
+        out["arquivo"] = e.file
+    if e.line is not None:
+        out["linha"] = e.line
+    return out
 
 
 def _report_json(r: ImportReport) -> dict[str, Any]:
@@ -124,7 +137,29 @@ def _report_json(r: ImportReport) -> dict[str, Any]:
     }
 
 
-def _invalid_response(exc: CocoImportError) -> JSONResponse:
+def _txt_report_json(r: TxtReport) -> dict[str, Any]:
+    return {
+        "status": r.status,
+        "dataset_id": r.dataset_id,
+        "imagens": {"declaradas": r.images_declared, "casadas": r.images_matched},
+        "classes": {
+            "declaradas": r.classes_declared,
+            "criadas": r.classes_created,
+            "existentes": r.classes_existing,
+        },
+        "anotacoes": {
+            "no_arquivo": r.annotations_in_file,
+            "importadas": r.annotations_imported,
+            "ja_existentes": r.annotations_already_existing,
+        },
+        "imagens_sem_caixas": r.images_without_boxes,
+        "avisos": [_item_json(w) for w in r.warnings],
+        "avisos_total": r.warnings_total,
+        "avisos_truncados": r.warnings_truncated,
+    }
+
+
+def _invalid_response(exc: ImportRejectedError) -> JSONResponse:
     # Conflito de estado (as imagens mudaram entre o plano e o bloqueio), não defeito do arquivo:
     # 409 mantendo o código `dataset_alterado`; o cliente repete a mesma chamada.
     changed = any(e.code == "dataset_alterado" for e in exc.errors)
@@ -188,97 +223,111 @@ def _db_down() -> JSONResponse:
     return error_response(503, "Banco de dados indisponível.", "banco_indisponivel")
 
 
+async def _with_repo(provider: DbProvider, fn: Any) -> Any:
+    """Executa `fn(repo)` numa conexão do pool; devolve o resultado ou uma `JSONResponse`."""
+    try:
+        async with AsyncExitStack() as stack:
+            try:
+                async with asyncio.timeout(DB_ACQUIRE_TIMEOUT) as deadline:
+                    conn = await stack.enter_async_context(provider.acquire())
+            except Exception as exc:
+                if deadline.expired():  # nosso prazo, não um TimeoutError do driver
+                    log.error("timeout ao obter conexão do banco")
+                    raise DbBusyError from None
+                log.error("banco indisponível: %s", type(exc).__name__)
+                raise DbUnavailableError from None
+            return await fn(ConnCocoRepository(conn))
+    except DbBusyError:
+        return error_response(
+            503, "Banco de dados ocupado; tente novamente.", "banco_timeout_conexao"
+        )
+    except DbUnavailableError:
+        return _db_down()
+    except ImportRejectedError as exc:
+        return _invalid_response(exc)
+    except repo.NotFoundError:
+        return error_response(404, "Dataset não encontrado.", "dataset_nao_encontrado")
+    except repo.LockTimeoutError:
+        log.error("bloqueio do projeto não obtido na importação")
+        return error_response(
+            503,
+            "Outra importação do projeto está em andamento; tente novamente.",
+            "importacao_em_andamento",
+        )
+    except (repo.RepositoryError, asyncpg.IntegrityConstraintViolationError) as exc:
+        # Violação de restrição não é indisponibilidade: só o tipo vai ao log (sem mensagem).
+        log.error("violação de integridade na importação: %s", type(exc).__name__)
+        return error_response(
+            409, "Conflito ao registrar as anotações no banco.", "conflito_integridade"
+        )
+    except _DB_ERRORS as exc:
+        log.error("erro de banco na importação: %s", type(exc).__name__)
+        return _db_down()
+    except Exception as exc:
+        log.error("erro inesperado na importação: %s", type(exc).__name__)
+        return error_response(500, "Erro interno no servidor.", "erro_interno")
+
+
+async def _receive(
+    request: Request, dataset_id: str, provider: DbProvider, limit: int, what: str
+) -> JSONResponse | tuple[int, bool, bool, bytes]:
+    """Valida id, query, tipo e tamanho, confere o dataset e lê o corpo em fluxo.
+
+    Devolve uma resposta de erro pronta ou `(dataset_id, dry_run, create_classes, corpo)`.
+    """
+    ds = _parse_dataset_id(dataset_id)
+    if ds is None:
+        return error_response(422, "Identificador de dataset inválido.", "dataset_id_invalido")
+    dry_run = _parse_flag(request, "dry_run", False)
+    if dry_run is None:
+        return error_response(422, "Parâmetro dry_run inválido.", "query_invalida")
+    create_classes = _parse_flag(request, "create_classes", True)
+    if create_classes is None:
+        return error_response(422, "Parâmetro create_classes inválido.", "query_invalida")
+    if not _content_type_ok(request.headers.get("content-type")):
+        return error_response(
+            415, f"Envie {what} como application/json (UTF-8).", "tipo_nao_suportado"
+        )
+    declared = request.headers.get("content-length")
+    if (
+        declared is not None
+        and declared.isascii()  # '²' passa em isdigit() e quebra int()
+        and declared.isdigit()
+        and int(declared) > limit
+    ):
+        return _too_large()
+
+    # Dataset inexistente é recusado antes de ler o corpo grande (conexão solta em seguida,
+    # para um cliente lento não segurar o pool).
+    async def check(r: ConnCocoRepository) -> None:
+        await r.get_dataset(ds)
+
+    failed = await _with_repo(provider, check)
+    if isinstance(failed, JSONResponse):
+        return failed
+    try:
+        body = await _read_body(request, limit)
+    except ClientDisconnect:
+        return error_response(400, "Requisição interrompida.", "requisicao_interrompida")
+    if body is None:
+        return _too_large()
+    return ds, dry_run, create_classes, body
+
+
 def register_import(app: FastAPI, settings: Settings, provider: DbProvider) -> None:
     """Acrescenta `POST /datasets/{dataset_id}/imports/coco` e o limite de corpo da rota."""
     limits = limits_from_settings(settings)
     app.add_middleware(RequestBodyLimitMiddleware, limit=limits.max_json_bytes, path=_PATH_RE)
 
-    async def _with_repo(fn: Any) -> Any:
-        """Executa `fn(repo)` numa conexão do pool; devolve o resultado ou uma `JSONResponse`."""
-        try:
-            async with AsyncExitStack() as stack:
-                try:
-                    async with asyncio.timeout(DB_ACQUIRE_TIMEOUT) as deadline:
-                        conn = await stack.enter_async_context(provider.acquire())
-                except Exception as exc:
-                    if deadline.expired():  # nosso prazo, não um TimeoutError do driver
-                        log.error("timeout ao obter conexão do banco")
-                        raise DbBusyError from None
-                    log.error("banco indisponível: %s", type(exc).__name__)
-                    raise DbUnavailableError from None
-                return await fn(ConnCocoRepository(conn))
-        except DbBusyError:
-            return error_response(
-                503, "Banco de dados ocupado; tente novamente.", "banco_timeout_conexao"
-            )
-        except DbUnavailableError:
-            return _db_down()
-        except CocoImportError as exc:
-            return _invalid_response(exc)
-        except repo.NotFoundError:
-            return error_response(404, "Dataset não encontrado.", "dataset_nao_encontrado")
-        except repo.LockTimeoutError:
-            log.error("bloqueio do projeto não obtido na importação")
-            return error_response(
-                503,
-                "Outra importação do projeto está em andamento; tente novamente.",
-                "importacao_em_andamento",
-            )
-        except (repo.RepositoryError, asyncpg.IntegrityConstraintViolationError) as exc:
-            # Violação de restrição não é indisponibilidade: só o tipo vai ao log (sem mensagem).
-            log.error("violação de integridade na importação: %s", type(exc).__name__)
-            return error_response(
-                409, "Conflito ao registrar as anotações no banco.", "conflito_integridade"
-            )
-        except _DB_ERRORS as exc:
-            log.error("erro de banco na importação: %s", type(exc).__name__)
-            return _db_down()
-        except Exception as exc:
-            log.error("erro inesperado na importação: %s", type(exc).__name__)
-            return error_response(500, "Erro interno no servidor.", "erro_interno")
-
     @app.post("/datasets/{dataset_id}/imports/coco")
     async def import_coco_route(dataset_id: str, request: Request) -> JSONResponse:
-        ds = _parse_dataset_id(dataset_id)
-        if ds is None:
-            return error_response(422, "Identificador de dataset inválido.", "dataset_id_invalido")
-        dry_run = _parse_flag(request, "dry_run", False)
-        if dry_run is None:
-            return error_response(422, "Parâmetro dry_run inválido.", "query_invalida")
-        create_classes = _parse_flag(request, "create_classes", True)
-        if create_classes is None:
-            return error_response(422, "Parâmetro create_classes inválido.", "query_invalida")
-        if not _content_type_ok(request.headers.get("content-type")):
-            return error_response(
-                415, "Envie o arquivo COCO como application/json (UTF-8).", "tipo_nao_suportado"
-            )
-        declared = request.headers.get("content-length")
-        if (
-            declared is not None
-            and declared.isascii()  # '²' passa em isdigit() e quebra int()
-            and declared.isdigit()
-            and int(declared) > limits.max_json_bytes
-        ):
-            return _too_large()
-
-        # Dataset inexistente é recusado antes de ler o corpo grande (conexão solta em seguida,
-        # para um cliente lento não segurar o pool).
-        async def check(r: ConnCocoRepository) -> None:
-            await r.get_dataset(ds)
-
-        failed = await _with_repo(check)
-        if isinstance(failed, JSONResponse):
-            return failed
-
-        try:
-            body = await _read_body(request, limits.max_json_bytes)
-        except ClientDisconnect:
-            return error_response(400, "Requisição interrompida.", "requisicao_interrompida")
-        if body is None:
-            return _too_large()
+        got = await _receive(request, dataset_id, provider, limits.max_json_bytes, "o arquivo COCO")
+        if isinstance(got, JSONResponse):
+            return got
+        ds, dry_run, create_classes, body = got
         try:
             parsed = await asyncio.to_thread(parse_coco, body, limits)
-        except CocoImportError as exc:
+        except ImportRejectedError as exc:
             return _invalid_response(exc)
         except Exception as exc:  # o parser promete não vazar; defesa extra
             log.error("erro inesperado no parser COCO: %s", type(exc).__name__)
@@ -291,8 +340,54 @@ def register_import(app: FastAPI, settings: Settings, provider: DbProvider) -> N
                 r, ds, parsed, create_classes=create_classes, dry_run=dry_run, limits=limits
             )
 
-        result = await _with_repo(run)
+        result = await _with_repo(provider, run)
         if isinstance(result, JSONResponse):
             return result
         status = 201 if result.status == "importado" else 200
         return JSONResponse(status_code=status, content=_report_json(result))
+
+
+def txt_limits_from_settings(s: Settings) -> TxtLimits:
+    return TxtLimits(
+        max_json_bytes=s.import_max_json_bytes,
+        max_images=s.import_max_images,
+        max_annotations=s.import_max_annotations,
+        max_categories=s.import_max_categories,
+        max_errors=s.import_max_errors,
+        max_yaml_bytes=s.import_max_yaml_bytes,
+    )
+
+
+def register_import_txt(app: FastAPI, settings: Settings, provider: DbProvider) -> None:
+    """Acrescenta a rota de rótulos txt (ADR-009) e uma segunda instância do limite de corpo."""
+    limits = txt_limits_from_settings(settings)
+    app.add_middleware(RequestBodyLimitMiddleware, limit=limits.max_json_bytes, path=_TXT_PATH_RE)
+
+    @app.post(TXT_ROUTE)
+    async def import_txt_route(dataset_id: str, request: Request) -> JSONResponse:
+        got = await _receive(
+            request, dataset_id, provider, limits.max_json_bytes, "o corpo dos rótulos"
+        )
+        if isinstance(got, JSONResponse):
+            return got
+        ds, dry_run, create_classes, body = got
+        try:
+            parsed = await asyncio.to_thread(parse_txt_labels, body, limits, collect_errors=True)
+        except ImportRejectedError as exc:
+            return _invalid_response(exc)
+        except Exception as exc:  # o parser promete não vazar; defesa extra
+            log.error("erro inesperado no parser de rótulos: %s", type(exc).__name__)
+            return error_response(500, "Erro interno no servidor.", "erro_interno")
+        finally:
+            del body
+
+        async def run(r: ConnCocoRepository) -> TxtReport:
+            return await import_txt_labels(
+                r, ds, parsed, create_classes=create_classes, dry_run=dry_run, limits=limits
+            )
+
+        result = await _with_repo(provider, run)
+        if isinstance(result, JSONResponse):
+            return result
+        status = 201 if result.status == "importado" else 200
+        return JSONResponse(status_code=status, content=_txt_report_json(result))

@@ -92,6 +92,7 @@ class Settings:
     import_max_categories: int = 1_000
     import_max_depth: int = 12
     import_max_errors: int = 100
+    import_max_yaml_bytes: int = 64 * 1024
 
     @property
     def postgres_dsn(self) -> str:
@@ -160,5 +161,8 @@ class Settings:
             ),
             import_max_errors=int(
                 _positive(e, "IMPORT_MAX_ERRORS", d.import_max_errors, integer=True)
+            ),
+            import_max_yaml_bytes=int(
+                _positive(e, "IMPORT_MAX_YAML_BYTES", d.import_max_yaml_bytes, integer=True)
             ),
         )

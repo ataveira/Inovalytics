@@ -386,6 +386,155 @@ Pinagem: major
     escrita concorrente de linha e não outra importação. Mensagem imprecisa, comportamento seguro.
   - Nenhum 503 envia `Retry-After` (`banco_indisponivel`, `banco_timeout_conexao`,
     `importacao_em_andamento`): o cliente decide o intervalo. Débito para todos os 503 da API.
+- Checagem de DoS (regra acrescentada na F1-07): nenhum custo por item fora do coletor quando ele
+  está cheio. Nada proporcional ao tamanho de um nome ou mensagem do usuário pode ser calculado por
+  item que o `ErrorCollector` vai descartar (limite de 100 por tipo): mensagens com nome e o campo
+  `file` são passados como funções sem argumentos (`LazyText`) e só são chamadas se o item for
+  guardado (`coco_service._lazy`). `shown()` para ao juntar 200 caracteres limpos. Endurecimento
+  de nomes (F1-07): `common.check_class_name` (usado só nas categorias) recusa controles, Cf (bidi,
+  ZWSP, BOM) e nome vazio após ignorar invisíveis (espaços Unicode, Cf, preenchimentos como
+  U+3164 e U+2800). U+200C (ZWNJ) e U+200D (ZWJ) são aceitos quando isolados entre dois
+  caracteres visíveis (emoji compostos, persa, escritas indianas); no início, no fim, repetidos ou
+  ao lado de espaço/invisível seguem recusados. `check_name` seguiu inalterado para `file_name`: testes da F1-06
+  (`test_control_characters_and_bidi_are_stripped_from_error_messages` e
+  `test_case_difference_does_not_match_and_error_is_safe`) fixam `file_name` com controles/bidi
+  aceitos e saneados nas mensagens; mudar isso é decisão do humano (H-F1-07-9).
 - Testes: HTTP com fakes em `backend/tests/test_api_coco_import.py` e `test_coco_core_static.py`
   (`make check`); fluxo real com Postgres em `backend/tests/test_coco_import_docker.py` (marcador
   `docker`, `make compose-smoke`; só o serviço `db`, imagens com `ObjectStore` em memória).
+
+## ADR-009: Importação de rótulos no formato YOLO (txt) (F1-07)
+
+- Status: proposta (aguarda o humano nas pendências H-F1-07-1 a H-F1-07-8; os padrões abaixo foram
+  assumidos para destravar a implementação e podem ser trocados). Reaproveita o desenho do ADR-008
+  (tudo ou nada, relatório por item, idempotência por multiconjunto, mesmos códigos HTTP).
+- Rota: `POST /datasets/{dataset_id}/imports/yolo-txt`, opções por query `dry_run` e
+  `create_classes`, iguais às da rota COCO. "YOLO" é aqui o nome de um formato de dados público
+  (uma linha `classe cx cy w h` normalizada por imagem, mais a lista de nomes de classe); o
+  Inovalytics não tem vínculo com a marca. A palavra aparece só no caminho da rota (constante única
+  em `api/imports.py`), na documentação e, quando existir, no rótulo de interface "formato YOLO
+  (txt)"; módulos, identificadores, códigos de erro e mensagens são neutros (teste estático em
+  `test_txt_core_static.py`). Se o humano preferir zero ocorrência no caminho, a alternativa é
+  `txt-normalizado` (troca da constante; H-F1-07-1).
+- Entrada em JSON, não zip nem multipart. Corpo `application/json`:
+  `{"names": [...] | {"0": "..."}` **ou** `"data_yaml": "<texto>"` (exatamente um; os dois juntos =
+  `names_ambiguo`), `"labels": {"<arquivo>.txt": "<conteúdo>"}}`. Motivos, por superfície de DoS: o
+  formato é um conjunto de arquivos pequenos e o JSON o representa sem arquivo temporário nem nomes
+  de entrada interpretados pelo servidor; zip traz zip bomb, `../`, links simbólicos e arquivo
+  temporário (tarefa própria, como a F1-06d); multipart traz limites de partes e cabeçalhos do
+  parser de formulário e o limite de 20 arquivos da F1-05 não serve para milhares de rótulos; JSON
+  reaproveita o que já foi medido e endurecido na F1-06 (`RequestBodyLimitMiddleware` por rota,
+  `_read_body` em fluxo, rejeição de `NaN`/`Infinity`/chave duplicada, parse em
+  `asyncio.to_thread`, 415 para outro `Content-Type`). Custo: o cliente monta o JSON. Chaves de
+  `labels` são rótulos de texto, nunca caminhos usados em disco ou S3. A rota registra uma segunda
+  instância do middleware de limite com o caminho próprio; cada rota tem o seu limite.
+- `data.yaml` com parser mínimo próprio (`imports/names_yaml.py`), sem PyYAML. Motivos: PyYAML é só
+  dependência de dev (usá-lo na API o promoveria a runtime); `safe_load` evita execução de código,
+  mas não expansão de aliases ("billion laughs"), `RecursionError` em aninhamento profundo nem
+  custo em linhas enormes; e YAML 1.1 converte escalares sem aspas (`no`, `off`, `1:30`) em outro
+  tipo, o que estragaria nomes de classe. Subconjunto aceito: só `names` (quatro formas: lista e mapa
+  de fluxo numa linha, lista e mapa de bloco) e `nc`; as demais chaves e seus filhos são ignorados
+  sem interpretação; escalares simples, entre aspas simples ou duplas (só `\"` e `\\`); ids do mapa
+  exatamente `0..n-1`; `nc` igual a `len(names)`. Tudo o mais (segundo documento, tabulação,
+  `&`, `*`, `!`, `|`, `>`, `<<`, aninhamento em `names`, escalar vazio ou `null`) é
+  `yaml_nao_suportado` com o número da linha. Sem expressão regular, uma passada linear, sem
+  recursão; teste AST proíbe `re`, `yaml` e `ruamel` nos módulos novos. O cliente que tiver um
+  `data.yaml` fora do subconjunto envia `names` em JSON.
+- Linhas de rótulo: separadas só por `\n` (sem `splitlines`, para a numeração ser estável), BOM
+  tolerado, linha vazia ignorada mas contada. Exatamente 5 campos; classe só com dígitos ASCII e menor
+  que `len(names)`; números como token ASCII restrito a `0123456789+-.eE` antes do `float`, depois
+  `math.isfinite`. Tolerância de 1e-6 nos intervalos, com ajuste (clamp) a `[0, 1]`; `w` ou `h`
+  nulos ou negativos são `caixa_area_zero`. Caixa que ultrapassa a borda é gravada sem recorte e
+  gera o aviso `caixa_fora_da_imagem` (mesma política da F1-06). Linha com 6 colunas
+  (`coluna_extra`, provável confiança de predição) ou polígono de segmentação
+  (`segmentacao_nao_suportada`) é erro por linha, não é ignorada em silêncio. Linhas repetidas são
+  mantidas (multiconjunto). Cada erro cita `arquivo` e `linha`.
+- Casamento rótulo-imagem por nome-base: a chave reduz-se ao último componente (`/` e `\`), é
+  sanitizada como no upload e perde o `.txt`; a imagem perde só a última extensão; comparação exata,
+  com distinção de maiúsculas. Sem imagem = `imagem_nao_encontrada`; duas imagens com o mesmo
+  nome-base = `imagem_ambigua`; duas chaves com o mesmo nome-base = `rotulo_nome_duplicado`. Colide
+  por desenho (`a.jpg` com `a.png`, `train/` com `val/`): recusa em vez de adivinhar (H-F1-07-2).
+  Arquivo vazio é válido (imagem de fundo) e conta em `imagens_sem_caixas`; imagem do dataset sem
+  arquivo de rótulo fica intacta. O `split` continua sendo o da F1-05.
+- Reaproveitamento da F1-06 por código, não por cópia: `ItemError` ganhou `file` e `line`;
+  `ImportRejectedError` é a base de `CocoImportError` (a rota captura a base); helpers de
+  `coco_parser` foram para `imports/common.py` e o núcleo independente de formato (classes,
+  excedente do multiconjunto, escrita em blocos na transação, relatório) para
+  `imports/import_core.py`; em `api/imports.py`, `_with_repo` virou função de módulo e o preâmbulo
+  da rota (id, query, tipo, `Content-Length`, dataset, leitura em fluxo) é compartilhado. Nenhum
+  teste da F1-06 foi alterado. O parser roda com `collect_errors=True`: defeitos de linha e de
+  casamento aparecem juntos no mesmo 422.
+- Resposta: igual à do COCO, sem `ignoradas_crowd` nem `segmentacoes_ignoradas`, com
+  `imagens_sem_caixas`. Erros e avisos ganham `arquivo` e `linha`, omitidos quando nulos, de modo que
+  a resposta COCO não mudou. Mensagens não repetem linhas inteiras (só o token ofensivo truncado, ou
+  nada). A rota não usa S3.
+- Configuração: nova `IMPORT_MAX_YAML_BYTES` (padrão 65 536, regra `_positive`), repassada no
+  `docker-compose.yml` e listada comentada em `.env.example`. As demais `IMPORT_*` valem também aqui;
+  constantes não configuráveis: linha de 1024 caracteres, chave de 1024 caracteres. A contagem de
+  linhas (`count("\n")`) é conferida antes de qualquer laço, o que impede que bytes de quebra de
+  linha virem milhões de iterações em Python com o GIL preso.
+- Guardas: `test_no_new_routes` liberou só a rota nova (commit separado); continuam valendo "só
+  `api/images.py` e `api/imports.py` importam `inovalytics.db`" e "a rota de importação não toca S3".
+- Sem dependência nova; `docs/licencas.md` inalterado. Nada da Ultralytics: o parser foi escrito a
+  partir da descrição pública do formato, com fixtures sintéticas em código. A licença dos dados
+  importados não é verificada (ressalva do ADR-008).
+- Sem autenticação até a F4-01: não abrir `API_BIND` para a rede com este endpoint antes disso.
+- Custos medidos (pelo implementador nas subtarefas 07b e 07c, CPython 3.13, uma thread, parser de
+  rótulos e `data_yaml`; máquina: ambiente de desenvolvimento x86_64, 2 vCPU, CPython 3.13 (sandbox
+  de CI do agente); repetir ao mudar limites ou hardware). Os testes de regressão rodam em thread com
+  `join(timeout)` e limite >= 2x o valor medido, nunca abaixo do orçamento de 2 s por caso:
+
+  | Caso | Tempo | Memória |
+  | --- | --- | --- |
+  | `data_yaml` de 64 KiB, pior caso entre as entradas hostis | 11,7 ms | não medida |
+  | 300 000 caixas válidas (máximo legítimo) | 0,82 s | 87 MB de pico |
+  | 1000 arquivos x 1000 erros cada (coletor limitado) | 0,46 s | 5 MB |
+  | Casos de 16 MiB hostis (`\n`, uma linha, `0 0 0 0 0\n`, espaços) recusados | < 0,12 s | não medida |
+  | 50 000 arquivos de rótulo de uma linha | 0,58 s | não medida |
+  | 300 000 avisos `caixa_fora_da_imagem`, chave de 1024 caracteres (F1-07 correção) | 0,9 a 1,5 s (era 47,95 s: `shown(chave)` por aviso) | não medida |
+  | 300 000 erros por linha (`0 x`), chave de 1024 caracteres | 0,13 a 0,22 s | não medida |
+
+  Os casos de 16 MiB são recusados pelos limites antes dos laços; o custo real está no parse
+  legítimo de muitas caixas. Como no ADR-008, o `json.loads` e o `str.split` seguram o GIL: uma
+  requisição grande ainda atrasa as demais pelo tempo da tabela; remédio completo e limite de
+  concorrência ficam com a F4-01. Os dois casos novos rodam em
+  `test_txt_hardening.py` (thread com `join(timeout)`, limite de 3 s) e conferem o mesmo relatório
+  de antes: total real de 300 000 e 100 itens guardados.
+- Checagem de DoS: nenhum custo por item fora do coletor quando ele está cheio (regra do ADR-008,
+  vale aqui). O parser calcula `shown(chave)` uma vez por arquivo; `ErrorCollector.add` aceita
+  `message` e `file` como funções e só as chama se guardar o item; o serviço usa o mesmo mecanismo.
+  O caso que reprovou a revisão: corpo de 6 MB, chave de 1024 caracteres, 300 000 linhas
+  `0 0.99 0.5 0.5 0.5`, 48 s com o GIL preso.
+- Separadores de coluna: só espaço e tab (vazios descartados; um `\r` final é tolerado). NBSP,
+  U+2028, U+0085, U+001C a U+001F e demais espaços Unicode não separam: colam ao campo e viram
+  `numero_invalido`, `classe_invalida` ou contagem de colunas errada (uma linha só com eles é uma
+  coluna inválida, não linha em branco). Antes, `str.split()` aceitava todos como separador. Dois
+  testes que fixavam o comportamento permissivo foram atualizados com justificativa no próprio
+  teste (`test_lone_cr_is_not_a_line_break`, `test_line_numbers_use_only_lf`).
+- `nc` entre aspas (`nc: "2"`) é recusado com `nc_invalido` e a linha; só inteiro simples vale.
+- Nomes de classe (`names` e `data_yaml`): recusados controles, substitutos, Zl/Zp e Cf (bidi,
+  ZWSP, BOM; ZWJ/ZWNJ só isolados entre caracteres visíveis) e nomes vazios após ignorar invisíveis
+  (`nome_invalido`); a mesma regra vale
+  nas categorias COCO (`common.check_class_name`, ver ADR-008).
+- Pendências do humano (padrão adotado entre parênteses; nenhuma é D1 a D5):
+  - H-F1-07-1. Nome da rota e uso da palavra "YOLO": `yolo-txt` e "formato YOLO (txt)" (padrão), ou
+    `txt-normalizado`; confirmar também se a allowlist da F1-11 aceita o literal.
+  - H-F1-07-2. Casamento por nome-base sem extensão e sem pasta, colisão recusa (padrão); alternativas:
+    exigir a extensão da imagem em `labels` (`a.jpg.txt`) ou a migração 0002 da H-F1-06-2.
+  - H-F1-07-3. `data.yaml`: parser mínimo próprio (padrão) ou PyYAML `safe_load` com limites,
+    promovendo PyYAML a dependência de runtime (MIT, registro em `licencas.md` e
+    `licencas-transitivas.md`).
+  - H-F1-07-4. Polígono ou coluna extra: erro por linha (padrão) ou ignorar e contar como na F1-06.
+  - H-F1-07-5. Atribuir `split` pela pasta da chave: fora desta tarefa (padrão); confirmar se vira
+    tarefa própria.
+  - H-F1-07-6. Tolerância de 1e-6 com ajuste (padrão) ou recusar qualquer valor fora de `[0, 1]`.
+  - H-F1-07-7. Limites herdados da F1-06 e `IMPORT_MAX_YAML_BYTES` de 64 KiB; ajustar ao tamanho
+    real dos datasets dos clientes.
+  - H-F1-07-8. Endpoint aberto até a F4-01 (H-F1-05-5, H-F1-06-8); H-F1-06-4 a H-F1-06-7 valem aqui
+    com o mesmo padrão e a mesma resposta do humano.
+  - H-F1-07-9. Recusar também controles/Cf em `file_name` do COCO (hoje aceitos e saneados nas
+    mensagens; exigiria mudar testes da F1-06).
+- Testes: HTTP com fakes em `backend/tests/test_api_txt_import.py`; configuração e guardas em
+  `test_txt_core_static.py`; serviço e parser em `test_txt_labels_service.py`,
+  `test_txt_labels_parser.py` e `test_names_yaml.py`; fluxo real com Postgres em
+  `backend/tests/test_txt_import_docker.py` (marcador `docker`, `make compose-smoke`).
