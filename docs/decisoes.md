@@ -281,3 +281,72 @@ Pinagem: major
   - H-F1-05-7. Limpeza de objetos órfãos (adiada; confirmar se vira tarefa antes da beta).
 - Testes: HTTP com fakes em `backend/tests/test_api_images.py` (`make check`); fluxo real com
   Postgres e SeaweedFS em `backend/tests/test_upload_docker.py` (marcador `docker`, `make compose-smoke`).
+
+## ADR-008: Importação COCO (F1-06)
+
+- Status: proposta (aguarda o humano nas pendências H-F1-06-1 a H-F1-06-8; os padrões abaixo foram
+  assumidos para destravar a implementação e podem ser trocados).
+- Rota: `POST /datasets/{dataset_id}/imports/coco`, corpo `application/json` com o próprio arquivo
+  COCO ("instances"), opções por query `dry_run` (padrão `false`) e `create_classes` (padrão `true`),
+  ambas estritas (`true`/`false`/`1`/`0`; outro valor ou repetição dá 422 `query_invalida`).
+  As imagens vêm da F1-05 (upload prévio); não há zip nem multipart, o que evita zip bomb, entradas
+  com `../`, links simbólicos e arquivo temporário. Zip fica como tarefa futura (F1-06d).
+- Parser próprio, só biblioteca padrão (`imports/coco_parser.py`), sem `pycocotools`: `json.loads`
+  com rejeição de `NaN`/`Infinity` e de chave duplicada, pré-checagem linear de profundidade, limites
+  de bytes, imagens, anotações, categorias e erros (`IMPORT_*`). Não é streaming: o limite de bytes
+  protege a memória. O parse roda em thread (`asyncio.to_thread`) para não travar o event loop.
+- Mapeamento de classes: por nome exato (após `strip`) com `label_class.name` do projeto; ausentes
+  são criadas (todas as declaradas, em ordem de `id`, `position` a partir de `max+1`) com
+  `create_classes=true`, ou viram erro `classe_ausente`. Classes existentes nunca são alteradas.
+- Casamento de imagens por `file_name` reduzido ao último componente e sanitizado como no upload
+  (comparação exata); nenhum caminho do arquivo toca disco ou S3. Nome repetido no dataset gera
+  `imagem_ambigua`. Dimensões do COCO só são conferidas; a conversão usa as gravadas.
+- Duas fases, tudo ou nada: fase 1 só lê e acumula todos os erros por item; fase 2 roda numa única
+  transação com `pg_advisory_xact_lock` por projeto (`lock_timeout` de 10 s) e desfaz tudo, inclusive
+  as classes criadas, em qualquer falha. `dry_run` executa só a fase 1 e leituras.
+- Idempotência sem migração: insere só o excedente do multiconjunto `(imagem, classe, x, y, w, h)`
+  em relação às anotações existentes; nunca apaga. Reimportar o mesmo arquivo cria 0 linhas.
+- Caixa que ultrapassa a borda mas é representável é gravada sem recorte e relatada como aviso
+  `caixa_fora_da_imagem`; a não representável (centro fora de `[0, 1]`, maior que a imagem) recusa a
+  importação inteira (`caixa_nao_representavel`). `iscrowd=1` é ignorado e contado; segmentação,
+  keypoints e URLs são ignorados (URLs jamais são acessadas).
+- Corpo e limites: o `RequestBodyLimitMiddleware` da F1-05 ganhou o parâmetro `path` (limite por
+  rota; uma instância por rota, comportamento do upload inalterado). A rota usa `IMPORT_MAX_JSON_BYTES`
+  (32 MiB): 413 por `Content-Length` sem ler o corpo e por contagem em fluxo (chunked ou
+  `Content-Length` mentiroso), abortando antes de acumular o corpo inteiro.
+- Códigos: 201 se algo foi criado (anotações ou classes); 200 sem alterações ou em `dry_run`; 404
+  `dataset_nao_encontrado` (verificado antes de ler o corpo, em conexão solta em seguida); 413
+  `requisicao_grande_demais`; 415 `tipo_nao_suportado` (qualquer `Content-Type` que não seja
+  `application/json`, ou `charset` diferente de UTF-8); 422 `importacao_invalida` (JSON, estrutura,
+  limites e erros por item, com `erros`, `erros_total`, `erros_truncados`), `dataset_id_invalido` e
+  `query_invalida`; 409 `conflito_integridade` (violação de restrição ou erro de domínio do
+  repositório na fase 2, tudo desfeito); 503 `banco_indisponivel`, `banco_timeout_conexao` e
+  `importacao_em_andamento` (`LockTimeoutError`: outra importação do projeto segura o bloqueio; o
+  cliente pode repetir); 500 `erro_interno`. Corpos e logs só trazem o tipo da exceção: nunca DSN,
+  endpoint, segredo, caminho, SQL nem o JSON enviado. Cada mensagem de item é cortada em 300
+  caracteres e o serviço limita o dado do usuário a 200.
+- Relatório de sucesso: `status` (`importado`, `sem_alteracoes`, `simulado`), contagens de imagens,
+  classes e anotações, `segmentacoes_ignoradas` e `avisos` (com total e truncamento).
+- Estrutura: `inovalytics.imports` (independente de HTTP) e `api/imports.py` (segundo e último
+  importador de `inovalytics.db` na camada `api`; `main.py` só registra a rota e continua sem importar
+  `inovalytics.db`). A rota não usa S3. Guardas da F1-04 e da F1-05 ajustados de forma mínima.
+- Sem dependência nova; licença dos dados importados (COCO oficial: CC BY 4.0, imagens com licenças
+  variadas) não é verificada pelo importador, que ignora `info` e `licenses`; dados de clientes podem
+  ter restrições próprias (registrar na documentação de usuário, F6).
+- Sem autenticação até a F4-01: não abrir `API_BIND` para a rede com este endpoint antes disso.
+- Pendências do humano (padrão adotado entre parênteses):
+  - H-F1-06-1. Entrada: JSON bruto e imagens pela F1-05 (alternativas: zip com imagens e JSON em
+    F1-06d, com limites de zip bomb; ou multipart).
+  - H-F1-06-2. Casamento por nome base (alternativa: migração 0002 guardando o caminho original).
+  - H-F1-06-3. Limites padrão (32 MiB, 50 000 imagens, 300 000 anotações, 1 000 categorias,
+    profundidade 12, 100 erros no relatório).
+  - H-F1-06-4. Idempotência por multiconjunto sem apagar (alternativas: substituir as anotações das
+    imagens do arquivo; coluna `source` em migração 0002).
+  - H-F1-06-5. Caixa que o esquema não comporta: recusar tudo (padrão) ou recortar com aviso.
+  - H-F1-06-6. Criar classes ausentes automaticamente, todas as declaradas (padrão), só as usadas,
+    ou exigir classes prévias.
+  - H-F1-06-7. `iscrowd=1`: ignorar e relatar (padrão) ou tratar como erro.
+  - H-F1-06-8. Endpoint aberto até a F4-01, como a F1-05 (H-F1-05-5).
+- Testes: HTTP com fakes em `backend/tests/test_api_coco_import.py` e `test_coco_core_static.py`
+  (`make check`); fluxo real com Postgres em `backend/tests/test_coco_import_docker.py` (marcador
+  `docker`, `make compose-smoke`; só o serviço `db`, imagens com `ObjectStore` em memória).
