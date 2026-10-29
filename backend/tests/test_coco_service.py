@@ -344,11 +344,27 @@ def test_single_transaction_with_lock_first_and_call_order() -> None:
     assert repo.calls.count("BEGIN") == 1 and repo.calls.count("COMMIT") == 1
     inside = repo.calls[repo.calls.index("BEGIN") :]
     assert inside == [
-        "BEGIN", "lock", "list_classes", "create_class", "list_annotations",
+        "BEGIN", "lock", "list_images", "list_classes", "create_class", "list_annotations",
         "insert_annotation_batch", "COMMIT",
     ]  # fmt: skip
     assert repo.calls[:3] == ["get_dataset", "list_images", "list_classes"]
     assert all(c not in WRITES for c in repo.calls[: repo.calls.index("BEGIN")])
+
+
+def test_images_changed_between_plan_and_lock_fail_cleanly_and_write_nothing() -> None:
+    class Racy(FakeRepo):
+        async def list_images_for_import(self, dataset_id: int, limit: int) -> list[ImportImage]:
+            out = await super().list_images_for_import(dataset_id, limit)
+            if "lock" in self.calls:
+                return []  # o upload/remoção concorrente mudou o conjunto após a fase 1
+            return out
+
+    repo = Racy()
+    with pytest.raises(CocoImportError) as ei:
+        run(import_coco(repo, 1, coco()))
+    assert ei.value.errors[0].code == "dataset_alterado"
+    assert repo.writes() == [] and repo.calls[-1] == "ROLLBACK"
+    assert "create_class" not in repo.calls and "insert_annotation_batch" not in repo.calls
 
 
 def test_class_vanished_before_lock_is_domain_error_when_not_creating() -> None:

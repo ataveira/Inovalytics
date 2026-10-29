@@ -291,6 +291,21 @@ async def import_coco(
     # Fase 2: uma transação; o bloqueio vem primeiro e o estado é relido sob ele.
     async with repo.transaction():
         await repo.lock_project_for_import(project_id)
+        # As imagens não são protegidas pelo bloqueio do projeto (o upload não o toma): se o
+        # conjunto mudou desde o plano da fase 1, nada é gravado e o cliente repete a chamada.
+        if await repo.list_images_for_import(dataset_id, lim.max_images + 1) != stored:
+            raise CocoImportError(
+                [
+                    ItemError(
+                        "dataset_alterado",
+                        K_FILE,
+                        None,
+                        None,
+                        "as imagens do dataset mudaram durante a importação; nada foi gravado, "
+                        "tente novamente",
+                    )
+                ]
+            )
         classes = await repo.list_classes(project_id)
         if not create_classes:
             late = ErrorCollector(lim.max_errors)
