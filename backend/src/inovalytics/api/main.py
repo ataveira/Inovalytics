@@ -25,7 +25,7 @@ from fastapi.responses import JSONResponse
 from inovalytics import __version__
 from inovalytics.api.config import Settings
 from inovalytics.api.images import DbProvider, LazyObjectStore, LazyPool, register_upload
-from inovalytics.api.imports import register_import
+from inovalytics.api.imports import register_import, register_import_txt
 from inovalytics.uploads.store import Boto3ObjectStore, ObjectStore
 
 logger = logging.getLogger(__name__)
@@ -291,6 +291,7 @@ def create_app(
 
     register_upload(app, cfg, provider, store)
     register_import(app, cfg, provider)
+    register_import_txt(app, cfg, provider)
     return app
 
 
