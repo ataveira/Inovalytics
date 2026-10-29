@@ -546,7 +546,7 @@ def test_python_multipart_registered(repo_root: Path) -> None:
     assert "pillow" not in lic.lower()
 
 
-def test_only_images_module_imports_db(repo_root: Path) -> None:
+def test_only_images_and_imports_modules_import_db(repo_root: Path) -> None:
     for path in (repo_root / "backend/src/inovalytics/api").glob("*.py"):
         mods: list[str] = []
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
@@ -555,7 +555,7 @@ def test_only_images_module_imports_db(repo_root: Path) -> None:
             elif isinstance(node, ast.ImportFrom):
                 mods.append(node.module or "")
         has_db = any(m.startswith("inovalytics.db") for m in mods)
-        assert has_db == (path.name == "images.py"), path.name
+        assert has_db == (path.name in {"images.py", "imports.py"}), path.name  # F1-06c
 
 
 def test_routes_are_only_health_and_upload() -> None:
