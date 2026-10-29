@@ -542,7 +542,7 @@ Pinagem: major
 
 ## ADR-010: Importação Pascal VOC (F1-08)
 
-- Status: proposta (aguarda o humano nas pendências H-F1-08-1 a H-F1-08-9; os padrões abaixo foram
+- Status: proposta (aguarda o humano nas pendências H-F1-08-1 a H-F1-08-10; os padrões abaixo foram
   assumidos para destravar a implementação e podem ser trocados). Reaproveita o desenho dos ADR-008
   e ADR-009: tudo ou nada, relatório por item, idempotência por multiconjunto, mesmos códigos HTTP,
   mesma função de erros de banco (`_with_repo`), mesmo `RequestBodyLimitMiddleware` com instância
@@ -603,6 +603,15 @@ Pinagem: major
 - A conversão de caixa e o casador de imagens foram extraídos para o núcleo compartilhado
   (`common.py`/`import_core.py`) em commit próprio, sem alterar teste da F1-06/07.
 
+- O teste docker (`test_voc_import_docker.py`) roda o app FastAPI no processo do teste, falando com
+  o Postgres do contêiner; o plano original previa o app dentro do contêiner `compose`. Cobre a
+  mesma rota, o mesmo SQL e o mesmo banco, mas não a imagem da API nem a rede do compose (isso fica
+  com `compose-smoke` da F1-03).
+- O planejamento (`_plan`, até 300 000 caixas, cerca de 1 s no pior caso) roda em
+  `asyncio.to_thread` dentro de `import_voc`, como o parse. Os serviços COCO (`_plan_boxes`) e
+  YOLO/txt (`_plan`) ainda planejam no laço de eventos: débito registrado (a troca é de uma linha,
+  mas foi deixada para não mexer em código e testes das F1-06/07 nesta tarefa).
+
 ### Regras de domínio
 
 - Geometria (H-F1-08-4): índices de pixel 1-based e inclusivos do devkit. Com `W`, `H` as dimensões
@@ -611,7 +620,8 @@ Pinagem: major
   `(0.5, 0.5, 0.5, 0.5)`. `xmin=0` é aceito, ajustado e contado em `ajustes_origem_zero`.
   `xmax < xmin`, valor negativo ou não numérico = erro; `xmax == xmin` é válido. Passar da borda
   (tolerância 1e-6) grava sem recorte e gera aviso; o que o esquema não guarda é
-  `caixa_nao_representavel`.
+  `caixa_nao_representavel`. Excesso de largura ou altura sobre a imagem inteira de até 1e-6 (a
+  mesma tolerância) é arredondamento: a dimensão é recortada para W/H em vez de recusada.
 - `<size>` (H-F1-08-5): opcional; presente e diferente do gravado (inclusive `0`) =
   `tamanho_divergente`; ausente = usa o gravado e conta `sem_size`.
 - `difficult`, `truncated`, `occluded`, `pose`, `<part>` (H-F1-08-3): o esquema não os guarda;
@@ -620,7 +630,8 @@ Pinagem: major
   difere da chave = `nome_divergente`; com extensão e coerente, casa por nome exato (sensível a
   maiúsculas); sem extensão ou ausente, casa por nome-base (colisão = `imagem_ambigua`); duas
   chaves para a mesma imagem = `rotulo_nome_duplicado`. Imagem sem XML fica intacta.
-- Classes (H-F1-08-8): as de `<object><name>`, nome exato após `strip`; `create_classes=true`
+- Classes (H-F1-08-8, H-F1-08-10): as de `<object><name>`, nome exato após `strip` (comparação
+  byte a byte em código de ponto, sem NFC/NFD: "é" composto e decomposto são duas classes); `create_classes=true`
   cria só as usadas, na ordem da primeira aparição; `false` com ausente = `classe_ausente`.
 - Lotes: o corpo é limitado a 16 MiB e a marcação total a 600 000 `<` (cerca de 7 100 arquivos
   típicos por requisição). Como a importação é idempotente, o cliente envia em lotes, cada um tudo
@@ -672,6 +683,10 @@ a mesma execução). O tempo inclui a decodificação do JSON no caso de corpo.
 | 600 001 `<` (um arquivo a mais) | `limite_excedido: max_total_markup` | 10 | 8,7 |
 | 7 300 arquivos típicos (1 002 bytes, 3 objetos, 84 `<`; 8,2 MiB; 613 200 `<`) | `limite_excedido: max_total_markup` | 38 | 16,7 |
 | 7 142 arquivos típicos (o máximo que cabe no orçamento; 8,0 MiB) | aceito | 1 040 (máx. 1 072) | 16,3 |
+| nomes hostis: 70 arquivos x 200 objetos, nome de 999 `a` + U+202E, 14,8 MiB, nenhum aceito | 14 000 `classe_invalida` | 430 (máx. 474; antes da correção: 1 905, máx. 2 293) | n/m |
+| nomes hostis ZWJ: `(a ZWJ)*499 + a + U+202E`, 59 arquivos, 7 316 objetos, 14,7 MiB | 7 316 `classe_invalida` | 350 (máx. 417; antes: 2 267, máx. 2 516) | n/m |
+| mesma forma, nomes válidos de 999 `a` (900 distintos), 14,7 MiB | aceito | 320 (antes: 510) | n/m |
+| mesma forma, nomes válidos `(a ZWJ)*499 + a` (900 distintos), 14,6 MiB | aceito | 580 (máx. 603; antes: 2 606, máx. 3 094) | n/m |
 
 Conclusões: (1) nenhum caso passa de 2 s; o pior caso legítimo (orçamento cheio) leva cerca de
 0,7 a 1,1 s, então `max_total_markup` = 600 000 foi mantido e a margem de teste é >= 2x (testes com
@@ -680,7 +695,21 @@ isolado (atributos, 10 ms) e as recusas por DOCTYPE (< 1 ms) são desprezíveis.
 16 MiB de objetos compactos NÃO é aceito: o orçamento de marcação o recusa em 49 ms; sem ele
 custaria 3,3 s com o GIL preso, que é o motivo do orçamento. (4) O plano citava 7 300 arquivos
 típicos; com o arquivo sintético de 84 `<` cabem 7 142 (com 70 `<`, de dois objetos, cabem 8 571).
-(5) Reproduzir: o script de medição não é versionado; os casos são os de
+(5) Nomes de classe (revisão da F1-08): `check_class_name` fazia um laço Python com
+`unicodedata.category` por caractere e por `<object>`; um corpo de 15 MB de nomes quase válidos
+custava 2,3 s com o GIL preso. Agora tabelas de pontos de código (frozenset calculado no import
+do módulo com o `unicodedata` do processo, cerca de 0,35 s uma vez) servem de pré-filtro em C:
+`set(nome).isdisjoint(proibidos)` decide sozinho todo nome sem ZWJ/ZWNJ, e nomes com joiner
+passam por um `split` em C que confere só as bordas de cada parte; `name_is_blank` usa
+`issuperset`. Um `lru_cache` foi descartado: a análise de módulos puros (`test_names_yaml.py`) só
+admite `math`, `unicodedata` e poucos mais, e as medições não o exigiram. A semântica é a mesma: `test_class_name_equivalence.py`
+compara a função antiga (copiada no teste) com a nova em todos os 1 114 112 pontos de código,
+isolados, em contexto ('a'+cp+'a') e ao lado de joiners, mais fuzz de ZWJ/ZWNJ; COCO, txt e
+`names_yaml` usam a mesma função e seus testes não foram tocados. Como todos os casos ficaram
+abaixo de 1 s, não foi preciso um orçamento total de caracteres de nomes. `test_voc_name_dos.py`
+afirma os tempos (< 1 s recusados, < 1,5 s aceitos) em thread com `join`.
+(6) Reproduzir: `python backend/tests/_voc_bench.py` (script versionado, fora do `make check`;
+usa os construtores de `test_voc_name_dos.py`); os casos de XML são os de
 `backend/tests/_xml_cases.py` e a fixture de `test_voc_budget.py`.
 
 ### Pendências do humano (padrão adotado entre parênteses; nenhuma é D1 a D5)
@@ -697,6 +726,9 @@ típicos; com o arquivo sintético de 84 `<` cabem 7 142 (com 70 `<`, de dois ob
 - H-F1-08-8. Classes: criar só as usadas (padrão), exigir prévias ou aceitar lista `names`.
 - H-F1-08-9. Endpoint aberto até a F4-01 (como H-F1-05-5, H-F1-06-8, H-F1-07-8); `API_BIND` fica em
   127.0.0.1. As H-F1-06-4 a H-F1-06-7 valem aqui com o mesmo padrão.
+- H-F1-08-10. Nomes de classe são comparados exatamente, sem normalização Unicode (padrão: "é"
+  composto e decomposto viram classes distintas); alternativa: normalizar para NFC ao importar
+  (afeta a identidade das classes já gravadas e as F1-06/07).
 - Testes: HTTP com fakes em `test_api_voc_import.py`; XXE de ponta a ponta (arquivo sentinela e
   servidor local que falha se contatado) em `test_api_voc_xxe.py`; configuração e guardas em
   `test_voc_config_static.py`; orçamento em `test_voc_budget.py`; leitor, parser e serviço em
