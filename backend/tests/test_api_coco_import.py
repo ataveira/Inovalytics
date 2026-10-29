@@ -296,6 +296,17 @@ def test_lying_small_content_length_does_not_bypass_the_limit(
     assert out["status"] == 413 and e.repo.writes() == []
 
 
+@pytest.mark.parametrize("value", [b"\xb2", b"\xb23", b"\xd9\xa3"])
+def test_unicode_digit_content_length_is_4xx_not_500(
+    monkeypatch: pytest.MonkeyPatch, value: bytes
+) -> None:
+    e = Env(monkeypatch, import_max_json_bytes=1000)
+    out = asgi_post(
+        e.app(), [b"{}"], [(b"content-type", b"application/json"), (b"content-length", value)]
+    )
+    assert 400 <= out["status"] < 500 and e.repo.writes() == []
+
+
 def test_limit_is_per_route(monkeypatch: pytest.MonkeyPatch) -> None:
     # A rota de importação tem o limite próprio; o de upload (>= 20 MiB) não a afeta e vice-versa.
     e = Env(monkeypatch, import_max_json_bytes=50, upload_max_bytes=10, upload_max_files=1)

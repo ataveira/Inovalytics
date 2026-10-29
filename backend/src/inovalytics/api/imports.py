@@ -249,7 +249,12 @@ def register_import(app: FastAPI, settings: Settings, provider: DbProvider) -> N
                 415, "Envie o arquivo COCO como application/json (UTF-8).", "tipo_nao_suportado"
             )
         declared = request.headers.get("content-length")
-        if declared is not None and declared.isdigit() and int(declared) > limits.max_json_bytes:
+        if (
+            declared is not None
+            and declared.isascii()  # '²' e outros dígitos Unicode passam em isdigit() e quebram int()
+            and declared.isdigit()
+            and int(declared) > limits.max_json_bytes
+        ):
             return _too_large()
 
         # Dataset inexistente é recusado antes de ler o corpo grande (conexão solta em seguida,
